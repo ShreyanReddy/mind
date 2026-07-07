@@ -5,7 +5,6 @@
 
 import { useEffect, useRef } from 'react'
 import { vault } from '../lib/store.js'
-import { buildGraph } from '../lib/links.js'
 
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim()
 
@@ -27,8 +26,7 @@ export default function GraphView({ onOpenNote }) {
     }
 
     function sync() {
-      const { notes, activity } = vault.get()
-      const g = buildGraph(notes, activity)
+      const g = vault.graph() // incremental index (PLAN.md §1.5) — no whole-vault reparse
       const cx = canvas.width / 2, cy = canvas.height / 2
 
       const seen = new Set()
@@ -228,8 +226,7 @@ export default function GraphView({ onOpenNote }) {
     }
   }, [onOpenNote])
 
-  const { notes } = vault.get()
-  const g = buildGraph(notes)
+  const g = vault.graph()
 
   return (
     <div className="graph-wrap">

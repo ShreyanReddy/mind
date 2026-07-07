@@ -11,7 +11,7 @@ Build, grow, and transfer your **mind clone**. An original, Obsidian-inspired kn
 - **Backlinks** — bidirectional connections panel per note
 - **Persona** — chat with an AI mind clone grounded in your strongest notes (bring your own Anthropic API key in Settings; stored in-browser only)
 - **Transfer** — export/import the entire mind as a portable `.mind.json` bundle (secrets stripped). This is the real unit of transfer and sale.
-- **Marketplace scaffold** — client logic (`src/lib/marketplace.js`) + Postgres schema (`supabase/schema.sql`), ready for the production build
+- **Marketplace scaffold** — client logic (`src/lib/marketplace.js`) + Postgres schema (`supabase/migrations/`), ready for the production build
 
 ## Run it
 
@@ -37,6 +37,6 @@ src/
   lib/marketplace.js      transfer/sale logic (local live, remote stubbed)
   components/             Sidebar, Editor, GraphView, ContextPanel,
                           PersonaChat, Marketplace, Settings
-supabase/schema.sql       marketplace database schema
+supabase/migrations/      ordered SQL migrations (marketplace, sync)
 PLAN.md                   production build plan for Claude Code (Opus 4.8)
 ```

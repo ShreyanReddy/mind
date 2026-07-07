@@ -17,9 +17,20 @@ export default function Editor({ note, onNavigate }) {
   const [ac, setAc] = useState(null) // { query, x, y, sel }
   const taRef = useRef(null)
 
-  const titles = useMemo(
-    () => vault.get().notes.map((n) => n.title).filter((t) => t !== note?.title),
-    [note?.id, note?.title, note?.updatedAt] // eslint-disable-line react-hooks/exhaustive-deps -- id/updatedAt intentionally force a refresh of the link-autocomplete title list on note switch or edit, not just on title change
+  // Autocomplete candidates: every note's title, plus each note's aliases
+  // shown as "alias → Title" — both insert as [[text]], which links.js /
+  // linkIndex.js resolve case-insensitively against title OR alias.
+  const candidates = useMemo(
+    () => {
+      const list = []
+      for (const n of vault.get().notes) {
+        if (n.id === note?.id) continue
+        list.push({ text: n.title, display: n.title })
+        for (const a of n.aliases || []) list.push({ text: a, display: `${a} → ${n.title}` })
+      }
+      return list
+    },
+    [note?.id, note?.title, note?.updatedAt] // eslint-disable-line react-hooks/exhaustive-deps -- id/updatedAt intentionally force a refresh of the link-autocomplete candidate list on note switch or edit, not just on title change
   )
 
   if (!note)
@@ -32,8 +43,18 @@ export default function Editor({ note, onNavigate }) {
     )
 
   const matches = ac
-    ? titles.filter((t) => t.toLowerCase().includes(ac.query.toLowerCase())).slice(0, 6)
+    ? candidates.filter((c) => c.text.toLowerCase().includes(ac.query.toLowerCase())).slice(0, 6)
     : []
+
+  function undoRedoKeyDown(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+      e.preventDefault()
+      if (e.shiftKey) vault.redo(note.id)
+      else vault.undo(note.id)
+      return true
+    }
+    return false
+  }
 
   function onBodyChange(e) {
     const val = e.target.value
@@ -63,11 +84,13 @@ export default function Editor({ note, onNavigate }) {
   }
 
   function onKeyDown(e) {
-    if (!ac || !matches.length) return
-    if (e.key === 'ArrowDown') { e.preventDefault(); setAc({ ...ac, sel: (ac.sel + 1) % matches.length }) }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setAc({ ...ac, sel: (ac.sel - 1 + matches.length) % matches.length }) }
-    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); acceptCompletion(matches[ac.sel]) }
-    else if (e.key === 'Escape') setAc(null)
+    if (ac && matches.length) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setAc({ ...ac, sel: (ac.sel + 1) % matches.length }); return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setAc({ ...ac, sel: (ac.sel - 1 + matches.length) % matches.length }); return }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); acceptCompletion(matches[ac.sel].text); return }
+      if (e.key === 'Escape') { setAc(null); return }
+    }
+    undoRedoKeyDown(e)
   }
 
   function onPreviewClick(e) {
@@ -101,7 +124,20 @@ export default function Editor({ note, onNavigate }) {
           className="editor-title"
           value={note.title}
           onChange={(e) => vault.updateNote(note.id, { title: e.target.value })}
+          onKeyDown={undoRedoKeyDown}
           aria-label="Note title"
+        />
+        <input
+          className="editor-aliases"
+          value={(note.aliases || []).join(', ')}
+          onChange={(e) =>
+            vault.updateNote(note.id, {
+              aliases: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+            })
+          }
+          onKeyDown={undoRedoKeyDown}
+          placeholder="aliases, comma, separated"
+          aria-label="Note aliases"
         />
         <div className="editor-meta">
           <span>strengthened ×{note.edits}</span>
@@ -121,13 +157,13 @@ export default function Editor({ note, onNavigate }) {
             />
             {ac && matches.length > 0 && (
               <div className="autocomplete" style={{ left: 26, bottom: 20 }}>
-                {matches.map((t, i) => (
+                {matches.map((c, i) => (
                   <div
-                    key={t}
+                    key={c.text + i}
                     className={i === ac.sel ? 'sel' : ''}
-                    onMouseDown={(e) => { e.preventDefault(); acceptCompletion(t) }}
+                    onMouseDown={(e) => { e.preventDefault(); acceptCompletion(c.text) }}
                   >
-                    [[{t}]]
+                    {c.display}
                   </div>
                 ))}
               </div>

@@ -1,16 +1,33 @@
-// store.js reads localStorage once at module load and keeps its state in a
-// closure, so each test gets a clean module instance via vi.resetModules()
-// + a fresh dynamic import, after seeding/clearing localStorage as needed.
+// store.js now hydrates asynchronously from Dexie/IndexedDB (write-behind
+// persistence, PLAN.md §1.1) rather than reading localStorage synchronously
+// at module load, so each test gets a clean module instance via
+// vi.resetModules() + a fresh dynamic import, then awaits vault.ready()
+// before asserting — this is the one intentional interface change store.js
+// picked up in Phase 1 (vault.get() itself is still fully synchronous once
+// ready() has resolved, which is what components rely on). IndexedDB is
+// reset between tests too, since the underlying fake-indexeddb database
+// persists across module reloads by name.
 import { describe, it, expect, beforeEach } from 'vitest'
 
 async function freshVault() {
   vi.resetModules()
   const mod = await import('../store.js')
+  await mod.vault.ready()
   return mod.vault
 }
 
-beforeEach(() => {
+function resetIndexedDb() {
+  return new Promise((resolve) => {
+    const req = indexedDB.deleteDatabase('manyam-mind')
+    req.onsuccess = () => resolve()
+    req.onerror = () => resolve()
+    req.onblocked = () => resolve()
+  })
+}
+
+beforeEach(async () => {
   localStorage.clear()
+  await resetIndexedDb()
 })
 
 describe('exportBundle', () => {

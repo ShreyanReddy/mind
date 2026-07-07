@@ -44,5 +44,6 @@ transfer or sell the mind. The MVP works; PLAN.md is the production roadmap.
 - `src/lib/marketplace.js` — transfer/sale logic (local live, remote stubbed)
 - `src/components/` — Sidebar, Editor, GraphView, ContextPanel, PersonaChat,
   Marketplace, Settings
-- `supabase/schema.sql` — marketplace database schema
+- `supabase/migrations/` — ordered SQL migrations (`0001_marketplace.sql`,
+  `0002_sync.sql`); `supabase/schema.sql` is now a pointer to these
 - `PLAN.md` — the production build plan (the source of truth for scope)

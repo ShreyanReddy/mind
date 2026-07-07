@@ -11,21 +11,34 @@ export function parseLinks(body = '') {
   return out
 }
 
-/** Notes that link TO the given title. */
-export function backlinksTo(notes, title) {
-  const t = title.trim().toLowerCase()
-  return notes.filter((n) =>
-    parseLinks(n.body).some((l) => l.target.toLowerCase() === t)
-  )
+/** Notes that link TO the given title (or, when given, any of its aliases). Case-insensitive. */
+export function backlinksTo(notes, title, aliases = []) {
+  const targets = new Set([title, ...aliases].filter(Boolean).map((t) => t.trim().toLowerCase()))
+  return notes.filter((n) => parseLinks(n.body).some((l) => targets.has(l.target.toLowerCase())))
+}
+
+/** Map every note to all of its resolution keys: title + aliases, lowercased. */
+function resolutionKeys(notes) {
+  const byKey = new Map()
+  for (const n of notes) {
+    const keys = [n.title, ...(Array.isArray(n.aliases) ? n.aliases : [])]
+    for (const raw of keys) {
+      const k = raw?.trim().toLowerCase()
+      if (k && !byKey.has(k)) byKey.set(k, n) // first writer wins on collision
+    }
+  }
+  return byKey
 }
 
 /**
- * Build the graph model.
+ * Build the graph model. Pure — reparses every note; the store maintains an
+ * incremental equivalent in linkIndex.js (vault.graph()) for scale.
  * Node weight = edits (use) + degree (connectivity) → visual "synaptic strength".
- * Edge weight = number of repeated links between the pair.
+ * Edge weight = number of repeated links between the pair. Link targets
+ * resolve against both titles and aliases (case-insensitive).
  */
 export function buildGraph(notes, activity = []) {
-  const byTitle = new Map(notes.map((n) => [n.title.trim().toLowerCase(), n]))
+  const byKey = resolutionKeys(notes)
   const nodes = new Map()
   const edges = new Map()
 
@@ -44,7 +57,7 @@ export function buildGraph(notes, activity = []) {
 
   for (const n of notes) {
     for (const l of parseLinks(n.body)) {
-      const target = byTitle.get(l.target.toLowerCase())
+      const target = byKey.get(l.target.toLowerCase())
       if (!target || target.id === n.id) continue
       const key = [n.id, target.id].sort().join('~')
       edges.set(key, {
@@ -58,6 +71,17 @@ export function buildGraph(notes, activity = []) {
   }
 
   return { nodes: [...nodes.values()], edges: [...edges.values()] }
+}
+
+const TAG_RE = /#([a-zA-Z][\w/-]*)/g
+
+/** #tag tokens found in a note body, lowercased and de-duplicated. */
+export function extractTags(body = '') {
+  const out = new Set()
+  let m
+  TAG_RE.lastIndex = 0
+  while ((m = TAG_RE.exec(body))) out.add(m[1].toLowerCase())
+  return [...out]
 }
 
 /** Strip markdown & links to plain text for persona context / previews. */

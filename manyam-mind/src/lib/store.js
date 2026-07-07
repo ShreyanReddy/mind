@@ -1,20 +1,55 @@
 // Vault store — the mind's substrate.
-// LocalStorage-persisted in the MVP; PLAN.md swaps this for a synced,
-// encrypted vault (Supabase + CRDT) without changing the component API.
+//
+// State lives in memory so `vault.get()` stays synchronous for components
+// (unchanged interface). Dexie (IndexedDB, db.js) is the durable source of
+// truth: writes are debounced write-behind flushes of only the dirty
+// records. `vault.ready()` resolves once the store has hydrated from Dexie
+// (migrating a legacy localStorage vault in, if present); main.jsx awaits it
+// before rendering. See PLAN.md §1.1.
 
-const KEY = 'manyam.vault.v1'
+import { db } from './db.js'
+import { linkIndex } from './linkIndex.js'
+import { parseLinks, extractTags } from './links.js'
+
+const LOCALSTORAGE_KEY = 'manyam.vault.v1'
+const FLUSH_DEBOUNCE_MS = 300
+const MAX_ACTIVITY_DEXIE = 5000
+const MAX_ACTIVITY_MEMORY = 500
+const MAX_UNDO_SNAPSHOTS = 100
+const UNDO_COALESCE_MS = 500
+
 const listeners = new Set()
+function notify() {
+  listeners.forEach((fn) => fn(state))
+}
 
-const seed = () => {
+function defaultPersona() {
+  return {
+    name: 'My Mind Clone',
+    voice: 'first person, direct, warm',
+    provider: 'anthropic',
+    model: 'claude-sonnet-4-6',
+    keys: { anthropic: '', openai: '', gemini: '' }, // browser-only, never exported
+  }
+}
+
+function normalizeNote(n, now = Date.now()) {
+  return {
+    id: n?.id || crypto.randomUUID(),
+    title: n?.title ?? 'Untitled',
+    body: n?.body ?? '',
+    folder: n?.folder ?? '',
+    tags: Array.isArray(n?.tags) ? n.tags : extractTags(n?.body ?? ''),
+    aliases: Array.isArray(n?.aliases) ? n.aliases : [],
+    createdAt: n?.createdAt ?? now,
+    updatedAt: n?.updatedAt ?? now,
+    edits: n?.edits ?? 0,
+  }
+}
+
+function seed() {
   const now = Date.now()
-  const mk = (title, body, ago) => ({
-    id: crypto.randomUUID(),
-    title,
-    body,
-    createdAt: now - ago,
-    updatedAt: now - ago,
-    edits: 1, // "synaptic strength" — grows with use
-  })
+  const mk = (title, body, ago) => normalizeNote({ title, body, createdAt: now - ago, updatedAt: now - ago, edits: 1 })
   return {
     notes: [
       mk(
@@ -38,62 +73,250 @@ const seed = () => {
         3600000 * 5
       ),
     ],
-    persona: {
-      name: 'My Mind Clone',
-      voice: 'first person, direct, warm',
-      provider: 'anthropic',
-      model: 'claude-sonnet-4-6',
-      keys: { anthropic: '', openai: '', gemini: '' }, // browser-only, never exported
-    },
-    activity: [], // { t, noteId } — feeds the graph's growth animation
+    persona: defaultPersona(),
+    activity: [], // { t, noteId, kind } — feeds the graph's growth animation & Phase 2's time-lapse
   }
 }
 
-let state = null
-try {
-  state = JSON.parse(localStorage.getItem(KEY))
-} catch { /* corrupted — reseed */ }
-if (!state || !Array.isArray(state.notes)) state = seed()
+// Synchronous placeholder until ready() resolves — keeps vault.get() safe to
+// call immediately after import (components must never see `null`).
+let state = { notes: [], persona: defaultPersona(), activity: [] }
+let hydrated = false
 
-function persist() {
-  localStorage.setItem(KEY, JSON.stringify(state))
-  listeners.forEach((fn) => fn(state))
+/* ---------------- write-behind persistence (Dexie) ---------------- */
+
+let flushTimer = null
+const dirtyNoteIds = new Set()
+const deletedNoteIds = new Set()
+const dirtyMetaKeys = new Set()
+let pendingActivity = []
+
+function scheduleFlush() {
+  if (!hydrated || flushTimer) return
+  flushTimer = setTimeout(() => {
+    flushTimer = null
+    flush()
+  }, FLUSH_DEBOUNCE_MS)
 }
+
+function markNoteDirty(id) {
+  dirtyNoteIds.add(id)
+  scheduleFlush()
+}
+
+function markMetaDirty(key) {
+  dirtyMetaKeys.add(key)
+  scheduleFlush()
+}
+
+function queueActivity(noteId, kind) {
+  const entry = { t: Date.now(), noteId, kind }
+  state.activity.push(entry)
+  if (state.activity.length > MAX_ACTIVITY_MEMORY) state.activity.splice(0, state.activity.length - MAX_ACTIVITY_MEMORY)
+  pendingActivity.push(entry)
+  scheduleFlush()
+}
+
+async function pruneActivityTable() {
+  const count = await db.activity.count()
+  if (count <= MAX_ACTIVITY_DEXIE) return
+  const excess = count - MAX_ACTIVITY_DEXIE
+  const oldestKeys = await db.activity.orderBy('t').limit(excess).primaryKeys()
+  if (oldestKeys.length) await db.activity.bulkDelete(oldestKeys)
+}
+
+/**
+ * Force an immediate write of everything currently dirty. Safe to call
+ * anytime. Never throws — a failed background save (quota, a torn-down
+ * IndexedDB in tests, etc.) is logged, not fatal to the app.
+ */
+export async function flush() {
+  if (!hydrated) return
+  if (flushTimer) {
+    clearTimeout(flushTimer)
+    flushTimer = null
+  }
+  const noteIds = [...dirtyNoteIds]
+  dirtyNoteIds.clear()
+  const delIds = [...deletedNoteIds]
+  deletedNoteIds.clear()
+  const metaKeys = [...dirtyMetaKeys]
+  dirtyMetaKeys.clear()
+  const acts = pendingActivity
+  pendingActivity = []
+
+  try {
+    await db.transaction('rw', db.notes, db.meta, db.activity, async () => {
+      const toPut = noteIds.map((id) => state.notes.find((n) => n.id === id)).filter(Boolean)
+      if (toPut.length) await db.notes.bulkPut(toPut)
+      if (delIds.length) await db.notes.bulkDelete(delIds)
+      for (const key of metaKeys) {
+        if (key === 'persona') await db.meta.put({ key, value: state.persona })
+      }
+      if (acts.length) await db.activity.bulkAdd(acts)
+    })
+    if (acts.length) await pruneActivityTable()
+  } catch (err) {
+    console.error('[store] flush failed', err)
+  }
+}
+
+/* ---------------- hydration / migration ---------------- */
+
+let readyPromise = null
+
+/** Resolves once the store has hydrated from Dexie (migrating localStorage in, or seeding). */
+export function ready() {
+  if (!readyPromise) readyPromise = hydrate()
+  return readyPromise
+}
+
+async function hydrate() {
+  const [dexieNotes, dexieMeta] = await Promise.all([db.notes.toArray(), db.meta.toArray()])
+  const metaMap = new Map(dexieMeta.map((m) => [m.key, m.value]))
+  const dexieEmpty = dexieNotes.length === 0 && !metaMap.has('persona')
+
+  let legacy = null
+  if (dexieEmpty && typeof localStorage !== 'undefined') {
+    try {
+      legacy = JSON.parse(localStorage.getItem(LOCALSTORAGE_KEY))
+    } catch {
+      legacy = null // corrupted — fall through to fresh seed
+    }
+  }
+
+  if (dexieEmpty && legacy && Array.isArray(legacy.notes)) {
+    // One-time migration: localStorage vault -> Dexie.
+    const now = Date.now()
+    state.notes = legacy.notes.map((n) => normalizeNote(n, now))
+    state.persona = { ...defaultPersona(), ...(legacy.persona || {}) }
+    state.activity = Array.isArray(legacy.activity)
+      ? legacy.activity.slice(-MAX_ACTIVITY_MEMORY).map((a) => ({ kind: 'edit', ...a }))
+      : []
+
+    await db.notes.bulkPut(state.notes)
+    await db.meta.put({ key: 'persona', value: state.persona })
+    if (state.activity.length) await db.activity.bulkAdd(state.activity.map((a) => ({ ...a })))
+    localStorage.removeItem(LOCALSTORAGE_KEY)
+  } else if (dexieEmpty) {
+    // Fresh install: seed only when both localStorage and Dexie are empty.
+    const s = seed()
+    state.notes = s.notes
+    state.persona = s.persona
+    state.activity = s.activity
+    await db.notes.bulkPut(state.notes)
+    await db.meta.put({ key: 'persona', value: state.persona })
+  } else {
+    state.notes = dexieNotes.map((n) => normalizeNote(n, n.createdAt))
+    state.persona = { ...defaultPersona(), ...(metaMap.get('persona') || {}) }
+    const acts = await db.activity.orderBy('t').reverse().limit(MAX_ACTIVITY_MEMORY).toArray()
+    state.activity = acts.reverse()
+  }
+
+  linkIndex.rebuild(state.notes)
+  hydrated = true
+  notify()
+  return state
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    // best-effort synchronous-ish flush; IndexedDB writes started here may
+    // not finish before unload, but this minimizes the loss window.
+    flush()
+  })
+}
+
+/* ---------------- undo/redo (bounded, in-memory, per note) ---------------- */
+
+// noteId -> { past: Snapshot[], future: Snapshot[], pendingBefore: Snapshot|null, lastEditAt: number }
+const undoStacks = new Map()
+
+function snapshotNote(n) {
+  return { title: n.title, body: n.body, folder: n.folder, tags: [...(n.tags || [])], aliases: [...(n.aliases || [])] }
+}
+
+function undoState(id) {
+  let st = undoStacks.get(id)
+  if (!st) {
+    st = { past: [], future: [], pendingBefore: null, lastEditAt: 0 }
+    undoStacks.set(id, st)
+  }
+  return st
+}
+
+function recordUndoableEdit(note, isNewWindow) {
+  const st = undoState(note.id)
+  if (isNewWindow) {
+    if (st.pendingBefore) {
+      st.past.push(st.pendingBefore)
+      if (st.past.length > MAX_UNDO_SNAPSHOTS) st.past.shift()
+    }
+    st.pendingBefore = snapshotNote(note) // state BEFORE this edit is applied
+  }
+  st.future = [] // ANY edit invalidates redo, not just the start of a new coalescing window
+  st.lastEditAt = Date.now()
+}
+
+function applySnapshot(note, snap) {
+  Object.assign(note, snap, { updatedAt: Date.now() })
+  note.tags = extractTags(note.body)
+  linkIndex.updateNote(note)
+  markNoteDirty(note.id)
+}
+
+/* ---------------- vault API ---------------- */
 
 export const vault = {
   get: () => state,
+  ready,
+  flush,
   subscribe(fn) {
     listeners.add(fn)
     return () => listeners.delete(fn)
   },
 
   createNote(title = 'Untitled') {
-    const note = {
-      id: crypto.randomUUID(),
-      title,
-      body: '',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      edits: 0,
-    }
+    const note = normalizeNote({ title })
     state.notes.unshift(note)
-    state.activity.push({ t: Date.now(), noteId: note.id })
-    persist()
+    linkIndex.updateNote(note)
+    markNoteDirty(note.id)
+    queueActivity(note.id, 'create')
+    notify()
     return note
   },
 
-  updateNote(id, patch) {
+  updateNote(id, patch, opts = {}) {
     const n = state.notes.find((n) => n.id === id)
     if (!n) return
-    Object.assign(n, patch, { updatedAt: Date.now(), edits: n.edits + 1 })
-    state.activity.push({ t: Date.now(), noteId: id })
-    if (state.activity.length > 500) state.activity.splice(0, 100)
-    persist()
+
+    const now = Date.now()
+    const st = undoState(id)
+    const isNewWindow = now - st.lastEditAt > UNDO_COALESCE_MS
+    recordUndoableEdit(n, isNewWindow)
+
+    const oldLinkCount = patch.body !== undefined ? parseLinks(n.body).length : 0
+    Object.assign(n, patch, { updatedAt: now, edits: n.edits + 1 })
+    if (patch.body !== undefined) n.tags = extractTags(n.body)
+    linkIndex.updateNote(n)
+    markNoteDirty(id)
+
+    queueActivity(id, opts.kind || 'edit')
+    if (patch.body !== undefined && parseLinks(n.body).length > oldLinkCount) {
+      queueActivity(id, 'link')
+    }
+    notify()
   },
 
   deleteNote(id) {
     state.notes = state.notes.filter((n) => n.id !== id)
-    persist()
+    linkIndex.removeNote(id)
+    undoStacks.delete(id)
+    deletedNoteIds.add(id)
+    dirtyNoteIds.delete(id)
+    scheduleFlush()
+    queueActivity(id, 'delete')
+    notify()
   },
 
   findByTitle(title) {
@@ -101,14 +324,123 @@ export const vault = {
     return state.notes.find((n) => n.title.trim().toLowerCase() === t)
   },
 
-  /** Resolve a wiki-link target, creating the note if it doesn't exist. */
+  /** Resolve a wiki-link target (title or alias), creating the note if it doesn't exist. */
   resolveOrCreate(title) {
-    return this.findByTitle(title) || this.createNote(title.trim())
+    const t = title.trim().toLowerCase()
+    const existing = state.notes.find(
+      (n) => n.title.trim().toLowerCase() === t || (n.aliases || []).some((a) => a.trim().toLowerCase() === t)
+    )
+    return existing || this.createNote(title.trim())
   },
 
   setPersona(patch) {
     Object.assign(state.persona, patch)
-    persist()
+    markMetaDirty('persona')
+    notify()
+  },
+
+  /** Merge notes parsed from a folder-vault load — upserts by id, then by title. Does not wipe the vault. */
+  importNotes(incoming = []) {
+    const now = Date.now()
+    for (const inc of incoming) {
+      const existing = state.notes.find((n) => n.id === inc.id) || this.findByTitle(inc.title || '')
+      if (existing) {
+        Object.assign(existing, inc, { id: existing.id, updatedAt: inc.updatedAt || now })
+        existing.tags = Array.isArray(inc.tags) && inc.tags.length ? inc.tags : extractTags(existing.body)
+        linkIndex.updateNote(existing)
+        markNoteDirty(existing.id)
+      } else {
+        const note = normalizeNote(inc, now)
+        state.notes.push(note)
+        linkIndex.updateNote(note)
+        markNoteDirty(note.id)
+      }
+    }
+    notify()
+  },
+
+  /** Apply a merged remote CRDT snapshot to a note without re-emitting into sync (loop guard lives in sync.js). */
+  applyRemotePatch(id, patch) {
+    const n = state.notes.find((n) => n.id === id)
+    if (!n) return
+    Object.assign(n, patch, { updatedAt: Date.now() })
+    n.tags = Array.isArray(patch.tags) ? patch.tags : extractTags(n.body)
+    linkIndex.updateNote(n)
+    markNoteDirty(id)
+    notify()
+  },
+
+  /* ---- undo/redo ---- */
+  undo(id) {
+    const n = state.notes.find((n) => n.id === id)
+    const st = undoStacks.get(id)
+    if (!n || !st) return false
+    if (st.pendingBefore) {
+      st.past.push(st.pendingBefore)
+      st.pendingBefore = null
+    }
+    if (!st.past.length) return false
+    const prev = st.past.pop()
+    st.future.push(snapshotNote(n))
+    applySnapshot(n, prev)
+    st.lastEditAt = Date.now()
+    queueActivity(id, 'edit')
+    notify()
+    return true
+  },
+
+  redo(id) {
+    const n = state.notes.find((n) => n.id === id)
+    const st = undoStacks.get(id)
+    if (!n || !st || !st.future.length) return false
+    const next = st.future.pop()
+    st.past.push(snapshotNote(n))
+    applySnapshot(n, next)
+    st.pendingBefore = null
+    st.lastEditAt = Date.now()
+    queueActivity(id, 'edit')
+    notify()
+    return true
+  },
+
+  canUndo(id) {
+    const st = undoStacks.get(id)
+    return Boolean(st && (st.past.length > 0 || st.pendingBefore))
+  },
+
+  canRedo(id) {
+    const st = undoStacks.get(id)
+    return Boolean(st && st.future.length > 0)
+  },
+
+  /* ---- incremental graph (PLAN.md §1.5) ---- */
+  graph() {
+    return linkIndex.graph(state.notes, state.activity)
+  },
+
+  /* ---- daily notes & templates (PLAN.md §1.4) ---- */
+  todayNote() {
+    const title = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
+    const existing = state.notes.find((n) => n.folder === 'Daily' && n.title === title)
+    if (existing) return existing
+    const note = this.createNote(title)
+    this.updateNote(note.id, { folder: 'Daily' })
+    return note
+  },
+
+  templates() {
+    return state.notes.filter((n) => n.folder === 'Templates')
+  },
+
+  newFromTemplate(templateId, title) {
+    const tpl = state.notes.find((n) => n.id === templateId)
+    if (!tpl) throw new Error('Template not found')
+    const dateStr = new Date().toISOString().slice(0, 10)
+    const finalTitle = (title || tpl.title).replace(/\{\{date\}\}/g, dateStr)
+    const note = this.createNote(finalTitle)
+    const body = tpl.body.replace(/\{\{date\}\}/g, dateStr).replace(/\{\{title\}\}/g, finalTitle)
+    this.updateNote(note.id, { body })
+    return note
   },
 
   /** Export the whole mind as a portable JSON bundle — the unit of transfer/sale. */
@@ -131,15 +463,14 @@ export const vault = {
     if (!Array.isArray(bundle.notes)) throw new Error('Bundle notes must be an array')
 
     const now = Date.now()
-    state.notes = bundle.notes.map((n) => ({
-      ...n,
-      id: n?.id || crypto.randomUUID(),
-      title: n?.title ?? 'Untitled',
-      body: n?.body ?? '',
-      createdAt: n?.createdAt ?? now,
-      updatedAt: n?.updatedAt ?? now,
-      edits: n?.edits ?? 0,
-    }))
+    for (const id of state.notes.map((n) => n.id)) deletedNoteIds.add(id)
+    state.notes = bundle.notes.map((n) => normalizeNote(n, now))
+    for (const n of state.notes) {
+      dirtyNoteIds.add(n.id)
+      deletedNoteIds.delete(n.id)
+    }
+    linkIndex.rebuild(state.notes)
+    undoStacks.clear()
 
     // Never import secrets, even from a malicious/malformed bundle — keys
     // and legacy apiKey are dropped, not merged, regardless of what the
@@ -147,6 +478,8 @@ export const vault = {
     const { apiKey, keys, ...importedPersona } = bundle.persona || {}
     state.persona = { ...state.persona, ...importedPersona }
     state.activity = []
-    persist()
+    markMetaDirty('persona')
+    scheduleFlush()
+    notify()
   },
 }
