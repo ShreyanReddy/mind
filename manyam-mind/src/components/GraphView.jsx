@@ -203,7 +203,7 @@ export default function GraphView({ onOpenNote }) {
         S.pan.y = S.drag.py + (e.clientY - S.drag.sy) * devicePixelRatio
       }
     }
-    const up = (e) => {
+    const up = () => {
       if (S.drag?.id && !moved) onOpenNote?.(S.drag.id)
       S.drag = null
     }

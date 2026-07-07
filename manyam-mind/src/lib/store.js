@@ -123,9 +123,29 @@ export const vault = {
   },
 
   importBundle(bundle) {
-    if (bundle?.format !== 'synapse-mind/1') throw new Error('Not a Manyam mind bundle')
-    state.notes = bundle.notes
-    state.persona = { ...state.persona, ...bundle.persona }
+    // 'synapse-mind/1' is the legacy format tag from before the rebrand —
+    // bundles exported under the old name must still import cleanly.
+    if (bundle?.format !== 'manyam-mind/1' && bundle?.format !== 'synapse-mind/1') {
+      throw new Error('Not a Manyam mind bundle')
+    }
+    if (!Array.isArray(bundle.notes)) throw new Error('Bundle notes must be an array')
+
+    const now = Date.now()
+    state.notes = bundle.notes.map((n) => ({
+      ...n,
+      id: n?.id || crypto.randomUUID(),
+      title: n?.title ?? 'Untitled',
+      body: n?.body ?? '',
+      createdAt: n?.createdAt ?? now,
+      updatedAt: n?.updatedAt ?? now,
+      edits: n?.edits ?? 0,
+    }))
+
+    // Never import secrets, even from a malicious/malformed bundle — keys
+    // and legacy apiKey are dropped, not merged, regardless of what the
+    // bundle claims.
+    const { apiKey, keys, ...importedPersona } = bundle.persona || {}
+    state.persona = { ...state.persona, ...importedPersona }
     state.activity = []
     persist()
   },

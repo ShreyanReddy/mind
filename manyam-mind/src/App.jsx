@@ -7,6 +7,7 @@ import GraphView from './components/GraphView.jsx'
 import PersonaChat from './components/PersonaChat.jsx'
 import Marketplace from './components/Marketplace.jsx'
 import Settings from './components/Settings.jsx'
+import ErrorBoundary from './components/ErrorBoundary.jsx'
 
 // simple original glyphs for the ribbon (no external icon set needed)
 const VIEWS = [
@@ -61,23 +62,31 @@ export default function App() {
         </button>
       </nav>
 
-      <Sidebar activeId={activeId} onSelect={openNote} />
+      <ErrorBoundary label="Sidebar">
+        <Sidebar activeId={activeId} onSelect={openNote} />
+      </ErrorBoundary>
 
-      {view === 'Notes' && <Editor note={note} onNavigate={openNote} />}
-      {view === 'Graph' && (
-        <div className="pane"><GraphView onOpenNote={openNote} /></div>
-      )}
-      {view === 'Persona' && (
-        <div className="pane"><PersonaChat onOpenNote={openNote} /></div>
-      )}
-      {view === 'Marketplace' && (
-        <div className="pane"><Marketplace /></div>
-      )}
-      {view === 'Settings' && (
-        <div className="pane"><Settings /></div>
-      )}
+      <ErrorBoundary label={view}>
+        {view === 'Notes' && <Editor note={note} onNavigate={openNote} />}
+        {view === 'Graph' && (
+          <div className="pane"><GraphView onOpenNote={openNote} /></div>
+        )}
+        {view === 'Persona' && (
+          <div className="pane"><PersonaChat onOpenNote={openNote} /></div>
+        )}
+        {view === 'Marketplace' && (
+          <div className="pane"><Marketplace /></div>
+        )}
+        {view === 'Settings' && (
+          <div className="pane"><Settings /></div>
+        )}
+      </ErrorBoundary>
 
-      {showContext && <ContextPanel note={note} onNavigate={openNote} />}
+      {showContext && (
+        <ErrorBoundary label="Connections">
+          <ContextPanel note={note} onNavigate={openNote} />
+        </ErrorBoundary>
+      )}
     </div>
   )
 }

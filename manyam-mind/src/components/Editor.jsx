@@ -19,7 +19,7 @@ export default function Editor({ note, onNavigate }) {
 
   const titles = useMemo(
     () => vault.get().notes.map((n) => n.title).filter((t) => t !== note?.title),
-    [note?.id, note?.updatedAt]
+    [note?.id, note?.title, note?.updatedAt] // eslint-disable-line react-hooks/exhaustive-deps -- id/updatedAt intentionally force a refresh of the link-autocomplete title list on note switch or edit, not just on title change
   )
 
   if (!note)

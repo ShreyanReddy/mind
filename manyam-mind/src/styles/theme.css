@@ -4,26 +4,7 @@
    flat panes, quiet chrome. Signature: the living graph.
    ========================================================================== */
 
-:root {
-  /* Brand — replace these six values to rebrand the entire app */
-  --ink-0: #1e1e1e;        /* editor background */
-  --ink-1: #262626;        /* raised surfaces / sidebars */
-  --ink-2: #363636;        /* borders, wells */
-  --glow-syn: #a882ff;     /* accent purple — links, live signals */
-  --glow-mind: #7f6df2;    /* deep purple — persona, selection, hubs */
-  --paper: #dcddde;        /* primary text */
-
-  --paper-dim: #999999;
-  --danger: #ff6b81;
-  --ok: #55d68a;
-
-  --font-display: 'Inter', system-ui, sans-serif;
-  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-
-  --radius: 6px;
-  --pane-gap: 1px;
-}
+@import './brand.css';
 
 * { box-sizing: border-box; }
 

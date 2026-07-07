@@ -46,6 +46,9 @@ export default function Sidebar({ activeId, onSelect }) {
               className={
                 'note-item' +
                 (n.id === activeId ? ' active' : '') +
+                // "hot" is a display-only recency heuristic re-derived from
+                // wall-clock time each render; it never feeds memoization.
+                // eslint-disable-next-line react-hooks/purity
                 (Date.now() - n.updatedAt < 60000 ? ' hot' : '')
               }
               onClick={() => onSelect(n.id)}

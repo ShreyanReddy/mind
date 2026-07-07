@@ -9,7 +9,15 @@ export default function Settings() {
     model: p.model || 'claude-sonnet-4-6',
     name: p.name,
     voice: p.voice,
-    keys: { anthropic: '', openai: '', gemini: '', ...(p.keys || {}), anthropic: (p.keys?.anthropic ?? p.apiKey ?? '') },
+    // legacy bundles stored a single top-level apiKey for the anthropic
+    // provider; fold it in as the anthropic key's default, then let the
+    // real per-provider keys object win.
+    keys: {
+      anthropic: p.apiKey || '',
+      openai: '',
+      gemini: '',
+      ...(p.keys || {}),
+    },
   })
   const [saved, setSaved] = useState(false)
 
