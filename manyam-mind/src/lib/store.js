@@ -36,8 +36,14 @@ function defaultPersona() {
     refusalTopics: [], // PLAN.md §4.5 — owner-excluded topics; intentionally NOT stripped on export
     exportedBy: null, // PLAN.md §4.4 — stamped at first export; the mind's origin owner, carried through import
     imported: false, // PLAN.md §4.4 — true once this vault arrived via importBundle (buyer-facing framing)
+    defaultNoteScope: 'private', // PLAN.md §5.3 — scope newly-created notes inherit; editable per-note afterward
   }
 }
+
+/** Valid values for note.scope — PLAN.md §5.3. 'private' (default, never leaves this device),
+ * 'mind' (server-side retrieval may use it to inform an answer, never quoted verbatim),
+ * 'published' (retrievable AND directly quotable in a hosted mind's answers). */
+export const NOTE_SCOPES = ['private', 'mind', 'published']
 
 function normalizeNote(n, now = Date.now()) {
   return {
@@ -47,6 +53,7 @@ function normalizeNote(n, now = Date.now()) {
     folder: n?.folder ?? '',
     tags: Array.isArray(n?.tags) ? n.tags : extractTags(n?.body ?? ''),
     aliases: Array.isArray(n?.aliases) ? n.aliases : [],
+    scope: NOTE_SCOPES.includes(n?.scope) ? n.scope : 'private', // PLAN.md §5.3 — survives export/import via this normalization
     createdAt: n?.createdAt ?? now,
     updatedAt: n?.updatedAt ?? now,
     edits: n?.edits ?? 0,
@@ -312,7 +319,10 @@ export const vault = {
   },
 
   createNote(title = 'Untitled') {
-    const note = normalizeNote({ title })
+    // PLAN.md §5.3 — new notes inherit the persona's default scope
+    // ("bulk default respected"); the per-note picker in Editor.jsx can
+    // always override it afterward.
+    const note = normalizeNote({ title, scope: state.persona.defaultNoteScope || 'private' })
     state.notes.unshift(note)
     linkIndex.updateNote(note)
     markNoteDirty(note.id)

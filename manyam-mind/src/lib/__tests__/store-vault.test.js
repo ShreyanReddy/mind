@@ -25,6 +25,38 @@ beforeEach(async () => {
   await resetIndexedDb()
 })
 
+describe('note.scope — PLAN.md §5.3 privacy scopes', () => {
+  it('defaults new notes to "private", or to persona.defaultNoteScope when set', async () => {
+    const vault = await freshVault()
+    expect(vault.createNote('Default scope').scope).toBe('private')
+
+    vault.setPersona({ defaultNoteScope: 'mind' })
+    expect(vault.createNote('Inherits mind scope').scope).toBe('mind')
+  })
+
+  it('updateNote can change a note\'s scope to any of the three values', async () => {
+    const vault = await freshVault()
+    const note = vault.createNote('Scoped')
+    vault.updateNote(note.id, { scope: 'published' })
+    expect(vault.get().notes.find((n) => n.id === note.id).scope).toBe('published')
+  })
+
+  it('normalizes an invalid/missing scope to "private" (e.g. a malformed import)', async () => {
+    const vault = await freshVault()
+    vault.importBundle({ format: 'manyam-mind/1', persona: {}, notes: [{ id: 'x', title: 'X', body: '', scope: 'not-a-real-scope' }] })
+    expect(vault.get().notes.find((n) => n.id === 'x').scope).toBe('private')
+  })
+
+  it('scope survives export/import round-trip', async () => {
+    const vault = await freshVault()
+    const note = vault.createNote('Round trip')
+    vault.updateNote(note.id, { scope: 'mind' })
+    const bundle = vault.exportBundle()
+    vault.importBundle(bundle)
+    expect(vault.get().notes.find((n) => n.title === 'Round trip').scope).toBe('mind')
+  })
+})
+
 describe('tags & aliases', () => {
   it('extracts #tags from the body on every update', async () => {
     const vault = await freshVault()

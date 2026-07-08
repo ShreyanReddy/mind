@@ -4,13 +4,12 @@ on:
   push:
   pull_request:
 
-defaults:
-  run:
-    working-directory: manyam-mind
-
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: manyam-mind
     steps:
       - uses: actions/checkout@v4
 
@@ -34,3 +33,27 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # Phase 5 (PLAN.md §5) — the mind-api service is a separate Node package
+  # (services/mind-api/), deployed independently on Railway; it gets its
+  # own job with its own working directory and its own dependency cache so
+  # a failure/change here never blocks or is blocked by the app job above.
+  mind-api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/mind-api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: services/mind-api/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test

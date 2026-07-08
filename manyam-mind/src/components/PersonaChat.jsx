@@ -7,7 +7,7 @@ import { chat } from '../lib/llm.js'
 import { backendConfigured } from '../lib/supabase.js'
 import { getSession } from '../lib/auth.js'
 
-export default function PersonaChat({ onOpenNote }) {
+export default function PersonaChat({ onOpenNote, autoInterviewSignal }) {
   const [history, setHistory] = useState([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -31,6 +31,14 @@ export default function PersonaChat({ onOpenNote }) {
   useEffect(() => {
     refreshStatus()
   }, [history.length])
+
+  // PLAN.md §5.6 — App.jsx bumps autoInterviewSignal when the app opens on
+  // the "#interview" hash (the hosted digest email's link target); jump
+  // straight into an interview turn without the owner clicking the button.
+  useEffect(() => {
+    if (autoInterviewSignal) startInterview()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run when the signal itself changes, not on every startInterview identity change
+  }, [autoInterviewSignal])
 
   async function regenerate() {
     setRegenBusy(true)

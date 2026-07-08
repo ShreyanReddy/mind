@@ -12,6 +12,7 @@ Build, grow, and transfer your **mind clone**. An original, Obsidian-inspired kn
 - **Persona** — chat with an AI mind clone grounded in your strongest notes. Retrieval blends keyword search (BM25) with synaptic strength by default, and upgrades to semantic (embedding) search when you opt in; a distilled "Persona Profile" note is auto-maintained from your strongest notes and injected alongside Identity Core; interview mode suggests related notes to link as you grow the vault. By default, chat routes through this mind's server proxy (platform-held keys, metered per account) once you're signed in — your own API key stays local unless you turn on Developer mode in Settings. The persona always identifies itself as a clone and enforces any topics you've told it to refuse.
 - **Transfer** — export/import the entire mind as a portable `.mind.json` bundle (secrets stripped). Works fully offline, no account needed.
 - **Marketplace** — sign in, list a mind for sale (client-side E2E-encrypted upload), browse and buy other minds, and complete escrowed sales end to end: payment is held by an internal escrow provider (no real money moves — Stripe is on hold by product decision; see PLAN.md §3.3), the content key is delivered sealed to the buyer's device, and the buyer verifies + imports before the sale finalizes. Every transfer's status timeline is visible; disputes/refunds are available within 72h of delivery.
+- **Mind API** — publish an owner-approved, privacy-scoped subset of your vault (per-note "Persona access": private/mind/published) as a hosted, queryable endpoint anyone can `POST /minds/:handle/ask` or integrate against — see the [Mind API](#mind-api) section below.
 
 ## Run it
 
@@ -50,6 +51,37 @@ Refusal topics are intentionally **not** treated as a secret — they're
 exported with the mind bundle so a purchased/imported mind keeps the same
 boundaries its seller set.
 
+## Mind API (PLAN.md §5)
+
+Each note has a **Persona access** level, set next to its title in the
+Editor: **Private** (default — never leaves this device), **Mind**
+(informs a hosted mind's answers, never quoted verbatim), or **Published**
+(directly quotable). "Publish my mind" (Marketplace tab → "Mind API" card)
+chunks and embeds only the Mind/Published notes, shows an explicit
+**"what will be shared" preview by scope** before anything is sent
+anywhere, then hosts the result at a queryable endpoint served by
+**`services/mind-api/`** — a standalone Node/Express service on
+**Railway**, not a Supabase Edge Function (owner decision, 2026-07-08;
+marketplace/escrow stay in Edge Functions). See
+`services/mind-api/README.md` for its endpoints, environment variables,
+and Railway deploy instructions.
+
+From this app's side:
+
+- Set `VITE_MIND_API_URL` (`.env.example`) to the deployed mind-api URL to
+  enable the Marketplace tab's publish/unpublish controls, price + free-tier
+  + weekly-digest-opt-in fields, and API key creation.
+- A hosted mind's public page (`<mind-api-url>/minds/:handle/page`) is a
+  small, self-contained HTML page with an "Ask this mind" box and a curl
+  example — no app deployment needed to try it.
+- Owners who opt into the weekly digest get an email (via Resend, inert
+  without `RESEND_API_KEY` — see `supabase/functions/interview-digest/`)
+  with 3 questions their mind wants answered; the links land on `#interview`,
+  which this app opens straight into an interview turn (`src/App.jsx`).
+- Billing is metering + a displayed, owner-set price only for now — Stripe
+  metered billing is on hold behind the same provider-stub seam as the
+  marketplace's escrow (`services/mind-api/src/billing.js`).
+
 ## Take it to production
 
 Open **PLAN.md** — a phase-by-phase build plan written for Claude Opus 4.8 in Claude Code, covering sync + encryption, the embeddings-based persona engine, the paid marketplace with signed ownership transfer, desktop packaging, and security/legal requirements.
@@ -69,16 +101,21 @@ src/
   lib/personaSafety.js    refusal pre-filter + always-on safety block
   lib/llm.js              multi-provider adapter: proxy / dev-mode / error
   lib/marketplace.js      listing/buy/sell client logic (E2E-encrypted)
+  lib/mindPublish.js      Mind API publish/unpublish pipeline (PLAN.md §5.3)
   lib/auth.js             sign up/in, profile bootstrap, keypair publish
   lib/agreement.js        plain-language transfer agreement (pure fn)
   lib/transferState.js    transfer status state machine (client mirror)
   components/             Sidebar, Editor, GraphView, ContextPanel,
-                          PersonaChat, Marketplace, AuthPanel, Settings
+                          PersonaChat, Marketplace, MindApiCard, AuthPanel,
+                          Settings
 supabase/migrations/      ordered SQL migrations (marketplace, sync, RLS,
-                          pgvector + usage metering)
+                          pgvector + usage metering, minds/api_keys/ask_*)
 supabase/functions/       Edge Functions: create-transfer, deliver-key,
                           get-bundle-url, confirm-import, dispute-transfer,
-                          delete-account, export-account, llm-proxy, embed
-                          (+ _shared/, incl. usage.ts metering)
+                          delete-account, export-account, llm-proxy, embed,
+                          interview-digest (+ _shared/, incl. usage.ts metering)
+services/mind-api/        Mind-as-a-Service Node/Express service (Railway) —
+                          POST /minds/:handle/ask and friends; see its own
+                          README.md
 PLAN.md                   production build plan for Claude Code (Opus 4.8)
 ```

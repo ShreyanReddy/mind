@@ -23,6 +23,7 @@ import {
 import { getSession, onAuthChange, signOut } from '../lib/auth.js'
 import { transferAgreement } from '../lib/agreement.js'
 import AuthPanel from './AuthPanel.jsx'
+import MindApiCard from './MindApiCard.jsx'
 
 const TABS = ['Browse', 'My listings', 'My purchases']
 const DISPUTE_WINDOW_MS = 72 * 60 * 60 * 1000
@@ -633,6 +634,7 @@ export default function Marketplace() {
       {tab === 'My listings' && <MyListingsTab />}
       {tab === 'My purchases' && <MyPurchasesTab />}
       <LocalTransferCard />
+      <MindApiCard />
       <AccountSection />
     </div>
   )

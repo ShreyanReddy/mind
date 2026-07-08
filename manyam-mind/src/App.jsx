@@ -24,8 +24,25 @@ export default function App() {
   const [view, setView] = useState('Notes')
   const [activeId, setActiveId] = useState(vault.get().notes[0]?.id || null)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [interviewSignal, setInterviewSignal] = useState(0)
 
   useEffect(() => vault.subscribe(() => force((n) => n + 1)), [])
+
+  // PLAN.md §5.6 — the hosted interview-digest email links to "#interview";
+  // opening the app on that hash jumps straight to Persona and starts an
+  // interview turn (PersonaChat.jsx watches `interviewSignal`). The hash is
+  // cleared immediately so refreshing/navigating away doesn't re-trigger it.
+  useEffect(() => {
+    function onHash() {
+      if (window.location.hash !== '#interview') return
+      setView('Persona')
+      setInterviewSignal((n) => n + 1)
+      history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+    onHash()
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
 
   useEffect(() => {
     function onKeyDown(e) {
@@ -125,7 +142,7 @@ export default function App() {
           <div className="pane"><GraphView onOpenNote={openNote} /></div>
         )}
         {view === 'Persona' && (
-          <div className="pane"><PersonaChat onOpenNote={openNote} /></div>
+          <div className="pane"><PersonaChat onOpenNote={openNote} autoInterviewSignal={interviewSignal} /></div>
         )}
         {view === 'Marketplace' && (
           <div className="pane"><Marketplace /></div>

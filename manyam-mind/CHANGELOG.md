@@ -633,3 +633,116 @@ before removal).
 
 `npm run lint`, `npm run typecheck`, `npm test` (209 tests, 23 files), and
 `npm run build` all pass.
+
+## Phase 5 — Mind-as-a-Service — 2026-07-08
+
+Turns a published mind into a hosted, queryable endpoint (PLAN.md §5), with
+three owner decisions amending the original plan (documented in-repo at
+each site they touch): the public Mind API is a **Node/Express service on
+Railway** (`services/mind-api/`), not a Supabase Edge Function — Edge
+Functions stay reserved for marketplace/escrow; **Stripe billing stays on
+hold**, so monetization here is metering + free-tier limits + an owner-set
+price that's stored and displayed, behind the same provider-stub seam as
+Phase 3's escrow; and the weekly interview digest emails via **Resend**,
+env-gated and inert without a key.
+
+- **Privacy scopes (§5.3).** Every note now carries `scope`: `'private'`
+  (default — never leaves the device), `'mind'` (server-side retrieval may
+  use it, never quoted verbatim), or `'published'` (quotable). `store.js`
+  normalizes/defaults it (surviving export/import automatically, since it's
+  just another note field) and `vault.createNote` inherits
+  `persona.defaultNoteScope` (new persona field, editable in Settings — "bulk
+  default respected"). Editor.jsx gained a "Persona access" select next to
+  the title. New `src/lib/mindPublish.js`: `publishPreview` (explicit
+  per-scope chunk-count preview before anything is sent anywhere),
+  `publishMind` (chunks `mind`/`published` notes via `retrieval.chunkVault`,
+  batch-embeds them through the existing `embed` Edge Function — new
+  `embeddings.embedTexts` export — deletes+reinserts this owner's
+  `mind_chunks` under a bumped `mind_version`, and upserts the `minds` row),
+  `unpublishMind`, `getMyMind`, `rateSampleAnswer` (voice-match stars).
+- **Schema (`supabase/migrations/0006_minds.sql`).** Idempotent: adds
+  `title`/`version` to `mind_chunks`; creates `minds` (handle, bio, stats,
+  sample questions, refusal topics, price/free-tier, current_version,
+  published state, voice_rating, digest_opt_in, gap_titles), `api_keys`
+  (sha-256-hashed, never plaintext), `ask_cache` (keyed by mind+version+
+  question hash — a republish naturally invalidates it), `ask_usage` (daily
+  per-mind counts). RLS: owner-all on `minds`/`api_keys`; a `public_minds`
+  view (owner-privilege view over the RLS table, the standard Supabase
+  pattern) exposes only the public subset — explicitly never
+  `refusal_topics` or `voice_rating`; `mind_chunks`/`ask_cache`/`ask_usage`
+  stay service-role-only, same append-only-via-server pattern as
+  `transfer_events`/`usage_events`.
+- **`services/mind-api/` — the hosted endpoint (§5.1/§5.2/§5.4/§5.5).** A
+  new, independent Node 20/Express package (own `package.json`; deps limited
+  to `express` + `@supabase/supabase-js`). `GET /healthz`,
+  `GET /minds/:handle` (public profile from `public_minds`),
+  `GET /minds/:handle/page` (self-contained dark HTML page — bio, stats,
+  clickable sample questions, an "Ask this mind" box, a curl example; no
+  external requests), `POST /minds/:handle/ask` (rate limit → free-tier
+  check → server-side refusal-topic check → cache lookup → retrieval over
+  `mind_chunks` (cosine when embeddings are present, BM25-style lexical
+  fallback otherwise, never retrieval-starving a small mind) → a server port
+  of the persona pipeline (`src/persona.js`: clone self-identification,
+  citation instructions, `stripVerbatimQuotes` mechanically masks any long
+  verbatim run copied from a `mind`-scoped chunk) → a provider router with
+  fallback (`src/providers.js`: preferred provider first, falls through the
+  rest of whatever's configured, mirrors `llm.js`/`llm-proxy`'s three
+  providers) → cache store → meter (`ask_usage` + per-key `usage_count`) →
+  `{ answer, citations, mind_version, cached }`), `POST /keys` /
+  `DELETE /keys/:id` (Supabase-JWT-authenticated; a key's plaintext is
+  returned exactly once). Abuse limits are an in-memory-per-instance token
+  bucket (`src/rateLimit.js`, documented Redis upgrade path for
+  multi-instance). `src/billing.js` mirrors the marketplace's
+  `InternalBillingStub`/`StripeStub` pattern exactly (`PLATFORM_FEE_BPS`
+  documented for later activation). `Dockerfile` + `railway.json`
+  (healthcheck `/healthz`) + `README.md` (env vars, local dev, deploy,
+  design notes).
+- **Quality & safety eval (§5.5).** `services/mind-api/eval/grounding.test.js`
+  exercises the persona pipeline against a mocked LLM answer and asserts:
+  every citation resolves to a real scoped chunk title (hallucinated titles
+  dropped), a refusal topic short-circuits before "the model" is ever
+  called, the verbatim-quote filter masks a mind-scoped run while leaving a
+  published-scoped quote intact, and the clone self-identification string
+  is present in the system prompt regardless of retrieved memories.
+- **Interview growth loop, hosted (§5.6).** `minds.digest_opt_in` +
+  `minds.gap_titles` (computed client-side at publish time via
+  `retrieval.knowledgeGaps`, stored rather than re-derived server-side).
+  New Edge Function `supabase/functions/interview-digest/index.ts`
+  (`verify_jwt` **false** — meant for cron, not a user session; a
+  `x-cron-secret` header check stands in instead; cron setup documented in
+  the file header) emails a "3 questions your mind wants answered" digest
+  via Resend, inert without `RESEND_API_KEY`, linking to `#interview`.
+  `App.jsx` now handles that hash by switching to the Persona tab and
+  bumping a `PersonaChat` prop (`autoInterviewSignal`) that starts an
+  interview turn automatically.
+- **App UI.** Marketplace's "Mind API" card
+  (`src/components/MindApiCard.jsx`) is real when signed in with a backend
+  configured: bio/sample-questions/price/free-tier/digest-opt-in fields, an
+  explicit per-scope "what will be shared" preview + consent checkbox
+  before every publish/republish, unpublish, endpoint URL + public-page
+  link display, "create API key" (calls mind-api's `POST /keys` with the
+  user's Supabase JWT, shows the key once), and voice-match star ratings
+  per sample question. Gated on `VITE_MIND_API_URL` (new env var,
+  `.env.example`) with an honest disabled state otherwise; demo mode
+  (no backend) unchanged.
+- **CI.** `.github/workflows/ci.yml` gained a second, independent
+  `mind-api` job (own working directory, own `npm ci`/`npm test`) alongside
+  the unchanged app job.
+- **Tests.** manyam-mind: 12 new (`store-vault.test.js`'s new `note.scope`
+  describe block — default/override/normalization/export-import round-trip
+  — and a new `mindPublish.test.js` covering preview counts, the full
+  publish upload shape, the embed-failure-still-publishes fallback, missing-
+  handle refusal, unpublish, and voice-rating merge), for **221 tests, 25
+  files**, all passing. services/mind-api (new package): **90 tests, 12
+  files** — provider fallback matrix, persona/safety-block/citation/
+  verbatim-filter unit tests, lexical/semantic retrieval, cache
+  normalization+hashing, the token-bucket limiter, api-key auth, and a full
+  `POST /ask` pipeline exercised end-to-end via supertest (happy path,
+  404/400s, provider fallback and total-failure, refusal short-circuit,
+  cache hit/invalidation-on-republish, free-tier 429 with price info,
+  API-key bypass + metering, revoked/wrong-mind key handling, and the
+  verbatim-quote mask) plus the grounding/safety eval harness above.
+
+`npm run lint`, `npm run typecheck`, `npm test` (221 tests, 25 files), and
+`npm run build` all pass for manyam-mind; `npm test` (90 tests, 12 files)
+passes for services/mind-api.

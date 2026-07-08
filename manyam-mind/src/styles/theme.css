@@ -110,13 +110,24 @@ input:focus, textarea:focus { outline: none; border-color: var(--glow-syn); }
 
 /* ---------- editor ---------- */
 .editor-wrap { display: flex; flex-direction: column; height: 100%; }
+.editor-title-row { display: flex; align-items: center; gap: 12px; padding: 18px 26px 4px; }
 .editor-title {
+  flex: 1;
   font-family: var(--font-display);
   font-size: 22px; font-weight: 700;
   background: transparent; border: none; color: var(--paper);
-  padding: 18px 26px 4px;
+  padding: 0;
 }
 .editor-title:focus { outline: none; }
+.editor-scope-label {
+  display: flex; align-items: center; gap: 6px; flex: none;
+  font-size: 11px; color: var(--paper-dim); text-transform: uppercase; letter-spacing: 0.04em;
+}
+.editor-scope {
+  font-size: 12px; text-transform: none; letter-spacing: normal;
+  background: var(--ink-1); color: var(--paper); border: 1px solid var(--ink-2);
+  border-radius: var(--radius); padding: 4px 8px;
+}
 .editor-meta { padding: 0 26px 10px; font-size: 12px; color: var(--paper-dim); display: flex; gap: 14px; }
 .editor-body {
   flex: 1;

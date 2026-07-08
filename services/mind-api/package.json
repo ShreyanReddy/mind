@@ -1,0 +1,23 @@
+{
+  "name": "mind-api",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Manyam Mind — Mind-as-a-Service (PLAN.md Phase 5): a Node/Express service hosting POST /minds/:handle/ask, each mind's own queryable endpoint. Deployed to Railway (see railway.json), not a Supabase Edge Function — owner decision 2026-07-08.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.1",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.10"
+  }
+}

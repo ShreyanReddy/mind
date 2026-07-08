@@ -183,6 +183,7 @@ export default function Settings() {
     developerMode: Boolean(p.developerMode),
     semanticRetrieval: Boolean(p.semanticRetrieval),
     refusalTopicsText: (p.refusalTopics || []).join(', '),
+    defaultNoteScope: p.defaultNoteScope || 'private',
   })
   const [saved, setSaved] = useState(false)
 
@@ -256,6 +257,20 @@ export default function Settings() {
         compute a vector, which is then cached on this device; the provider does not retain it and
         this app never uploads your note content anywhere else. Falls back to fully offline
         keyword+strength retrieval whenever this is off, unconfigured, or unavailable.
+      </p>
+
+      <label>
+        Default persona access for new notes
+        <select value={form.defaultNoteScope} onChange={set('defaultNoteScope')}>
+          <option value="private">Private — never shared</option>
+          <option value="mind">Mind — informs hosted answers, never quoted</option>
+          <option value="published">Published — quotable by a hosted mind</option>
+        </select>
+      </label>
+      <p className="empty-hint">
+        New notes start at this access level (PLAN.md §5.3); change any single note's level
+        anytime via the picker next to its title. Only notes scoped "Mind" or "Published" are
+        ever sent to the Mind API publish pipeline — "Private" notes never leave this device.
       </p>
 
       <label>

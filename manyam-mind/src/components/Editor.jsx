@@ -1,6 +1,12 @@
 import { useMemo, useRef, useState } from 'react'
 import { marked } from 'marked'
-import { vault } from '../lib/store.js'
+import { vault, NOTE_SCOPES } from '../lib/store.js'
+
+const SCOPE_LABEL = {
+  private: 'Private — never shared',
+  mind: 'Mind — informs answers, never quoted',
+  published: 'Published — quotable',
+}
 
 // Render [[links]] as clickable spans inside the markdown preview.
 function renderPreview(body) {
@@ -120,13 +126,28 @@ export default function Editor({ note, onNavigate }) {
       </div>
 
       <div className="editor-wrap">
-        <input
-          className="editor-title"
-          value={note.title}
-          onChange={(e) => vault.updateNote(note.id, { title: e.target.value })}
-          onKeyDown={undoRedoKeyDown}
-          aria-label="Note title"
-        />
+        <div className="editor-title-row">
+          <input
+            className="editor-title"
+            value={note.title}
+            onChange={(e) => vault.updateNote(note.id, { title: e.target.value })}
+            onKeyDown={undoRedoKeyDown}
+            aria-label="Note title"
+          />
+          <label className="editor-scope-label" title="Controls whether a hosted mind (PLAN.md §5) can use this note to answer questions.">
+            Persona access
+            <select
+              className="editor-scope"
+              value={note.scope || 'private'}
+              onChange={(e) => vault.updateNote(note.id, { scope: e.target.value })}
+              aria-label="Persona access"
+            >
+              {NOTE_SCOPES.map((s) => (
+                <option key={s} value={s}>{SCOPE_LABEL[s]}</option>
+              ))}
+            </select>
+          </label>
+        </div>
         <input
           className="editor-aliases"
           value={(note.aliases || []).join(', ')}
