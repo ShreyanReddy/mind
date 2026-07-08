@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { vault } from './lib/store.js'
 import { downloadBundle } from './lib/marketplace.js'
+import { track } from './lib/telemetry.js'
 import Sidebar from './components/Sidebar.jsx'
 import Editor from './components/Editor.jsx'
 import ContextPanel from './components/ContextPanel.jsx'
@@ -31,6 +32,9 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false)
 
   useEffect(() => vault.subscribe(() => force((n) => n + 1)), [])
+
+  // Counts view names only (PLAN.md §6.3) — no note data ever leaves here.
+  useEffect(() => track(`view.${view}`), [view])
 
   // PLAN.md §5.6 — the hosted interview-digest email links to "#interview";
   // opening the app on that hash jumps straight to Persona and starts an
