@@ -12,6 +12,10 @@
 //   outbox   — auto-increment id -> queued, already-encrypted Yjs updates
 //              waiting to be pushed to Supabase when sync is configured and
 //              the device is online (PLAN.md §1.2)
+//   vectors  — chunkKey (primary key) -> cached embedding for one chunk of
+//              one note, keyed by a hash of noteId+chunk text so an edit
+//              produces a new key (re-embedded) while unchanged text keeps
+//              hitting the cache. PLAN.md §4.1 (src/lib/embeddings.js).
 
 import Dexie from 'dexie'
 
@@ -22,6 +26,12 @@ db.version(1).stores({
   meta: 'key',
   activity: '++id, t, noteId',
   outbox: '++id, noteId',
+})
+
+// Dexie only requires the tables that changed since the previous version;
+// notes/meta/activity/outbox keep their v1 definitions unchanged.
+db.version(2).stores({
+  vectors: 'chunkKey, noteId',
 })
 
 export default db

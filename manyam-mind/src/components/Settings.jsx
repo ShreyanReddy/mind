@@ -4,6 +4,8 @@ import { PROVIDERS } from '../lib/llm.js'
 import { db } from '../lib/db.js'
 import * as fsvault from '../lib/fsvault.js'
 import { sodiumReady, deriveVaultKey, getSessionKey, setSessionKey, clearSessionKey } from '../lib/crypto.js'
+import { parseRefusalTopics } from '../lib/personaSafety.js'
+import { backendConfigured } from '../lib/supabase.js'
 
 function FolderVaultSection() {
   const [connected, setConnected] = useState(fsvault.isConnected())
@@ -178,11 +180,15 @@ export default function Settings() {
       gemini: '',
       ...(p.keys || {}),
     },
+    developerMode: Boolean(p.developerMode),
+    semanticRetrieval: Boolean(p.semanticRetrieval),
+    refusalTopicsText: (p.refusalTopics || []).join(', '),
   })
   const [saved, setSaved] = useState(false)
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
   const setKey = (prov) => (e) => setForm({ ...form, keys: { ...form.keys, [prov]: e.target.value } })
+  const setFlag = (k) => (e) => setForm({ ...form, [k]: e.target.checked })
   const models = PROVIDERS[form.provider].models
 
   return (
@@ -215,22 +221,63 @@ export default function Settings() {
           {models.map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
       </label>
-      {Object.keys(PROVIDERS).map((prov) => (
-        <label key={prov}>
-          {PROVIDERS[prov].label} API key {form.provider === prov ? '(active)' : '(optional)'}
-          <input
-            type="password"
-            value={form.keys[prov]}
-            onChange={setKey(prov)}
-            placeholder="stored only in this browser; never exported"
-          />
-        </label>
-      ))}
+      <label className="consent-row">
+        <input type="checkbox" checked={form.developerMode} onChange={setFlag('developerMode')} />
+        Developer mode — chat directly from this browser using your own API key
+      </label>
+      <p className="empty-hint">
+        Off by default (PLAN.md §4.3): normally chat routes through this mind's server proxy, which
+        uses platform-held keys and meters usage per account — your own key never leaves this
+        device. Turning developer mode on switches to calling the provider directly from your
+        browser with the key(s) you paste below instead; this is the ONLY way that path runs.
+        {!backendConfigured && ' No backend is configured for this deployment, so developer mode is currently the only way to chat.'}
+      </p>
+      {form.developerMode &&
+        Object.keys(PROVIDERS).map((prov) => (
+          <label key={prov}>
+            {PROVIDERS[prov].label} API key {form.provider === prov ? '(active)' : '(optional)'}
+            <input
+              type="password"
+              value={form.keys[prov]}
+              onChange={setKey(prov)}
+              placeholder="stored only in this browser; never exported"
+            />
+          </label>
+        ))}
+
+      <label className="consent-row">
+        <input type="checkbox" checked={form.semanticRetrieval} onChange={setFlag('semanticRetrieval')} />
+        Semantic retrieval (sends note text to the embedding provider transiently)
+      </label>
+      <p className="empty-hint">
+        Off by default (PLAN.md §4.1). When on, your notes are split into chunks and embedded via
+        this mind's backend (Voyage or OpenAI, whichever is configured) so the persona can retrieve
+        by meaning, not just keyword — each chunk's text is sent to that provider transiently to
+        compute a vector, which is then cached on this device; the provider does not retain it and
+        this app never uploads your note content anywhere else. Falls back to fully offline
+        keyword+strength retrieval whenever this is off, unconfigured, or unavailable.
+      </p>
+
+      <label>
+        Topics my clone must refuse to discuss (comma-separated)
+        <input
+          value={form.refusalTopicsText}
+          onChange={set('refusalTopicsText')}
+          placeholder="e.g. my health, my ex, salary details"
+        />
+      </label>
+      <p className="empty-hint">
+        Enforced on every reply (PLAN.md §4.5) and cannot be turned off — only this list is
+        editable. It's exported with the mind bundle (unlike API keys) so an imported/purchased
+        mind keeps the same boundaries you set.
+      </p>
+
       <div>
         <button
           className="primary"
           onClick={() => {
-            vault.setPersona({ ...form, apiKey: undefined })
+            const { refusalTopicsText, ...rest } = form
+            vault.setPersona({ ...rest, refusalTopics: parseRefusalTopics(refusalTopicsText), apiKey: undefined })
             setSaved(true)
             setTimeout(() => setSaved(false), 1500)
           }}

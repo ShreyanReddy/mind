@@ -9,7 +9,7 @@ Build, grow, and transfer your **mind clone**. An original, Obsidian-inspired kn
 - **Vault** — markdown notes with `[[wiki-links]]`, autocomplete, click-to-create, read/write modes, full-text search
 - **Living graph** — custom force-directed canvas network. Nodes are neurons, links are synapses. Frequently edited/linked notes grow larger and brighter; recent edits pulse; new links fire a traveling spark. Drag, pan, zoom, click to open.
 - **Backlinks** — bidirectional connections panel per note
-- **Persona** — chat with an AI mind clone grounded in your strongest notes (bring your own Anthropic API key in Settings; stored in-browser only)
+- **Persona** — chat with an AI mind clone grounded in your strongest notes. Retrieval blends keyword search (BM25) with synaptic strength by default, and upgrades to semantic (embedding) search when you opt in; a distilled "Persona Profile" note is auto-maintained from your strongest notes and injected alongside Identity Core; interview mode suggests related notes to link as you grow the vault. By default, chat routes through this mind's server proxy (platform-held keys, metered per account) once you're signed in — your own API key stays local unless you turn on Developer mode in Settings. The persona always identifies itself as a clone and enforces any topics you've told it to refuse.
 - **Transfer** — export/import the entire mind as a portable `.mind.json` bundle (secrets stripped). Works fully offline, no account needed.
 - **Marketplace** — sign in, list a mind for sale (client-side E2E-encrypted upload), browse and buy other minds, and complete escrowed sales end to end: payment is held by an internal escrow provider (no real money moves — Stripe is on hold by product decision; see PLAN.md §3.3), the content key is delivered sealed to the buyer's device, and the buyer verifies + imports before the sale finalizes. Every transfer's status timeline is visible; disputes/refunds are available within 72h of delivery.
 
@@ -21,7 +21,34 @@ npm run dev
 # open http://localhost:5173
 ```
 
-Without a Supabase backend configured, the Marketplace tab still works fully offline (export/import a `.mind.json` bundle). To enable accounts, listings, and escrowed sales, copy `.env.example` to `.env.local` and fill in your Supabase project's URL + anon key, then apply `supabase/migrations/*.sql` and deploy `supabase/functions/*` to that project.
+Without a Supabase backend configured, the Marketplace tab still works fully offline (export/import a `.mind.json` bundle), and Persona chat works via Developer mode (Settings → your own API key). To enable accounts, listings, escrowed sales, the server LLM proxy, and semantic retrieval, copy `.env.example` to `.env.local` and fill in your Supabase project's URL + anon key, then apply `supabase/migrations/*.sql` and deploy `supabase/functions/*` to that project (see `.env.example` for the Edge Function secrets each of `llm-proxy`/`embed` needs — all platform-held, never a user's own key).
+
+### Privacy note (persona engine v3, PLAN.md §4)
+
+The vault stays end-to-end: nothing here changes that. Two narrow, always
+owner-opted-in exceptions exist once a backend is configured:
+
+- **Semantic retrieval** (Settings, default **off**): when on, note chunks
+  you've edited are sent *transiently* to an embedding provider (Voyage or
+  OpenAI, whichever this deployment configures) to compute a vector; the
+  provider doesn't retain the text, the server doesn't log or store it, and
+  only the resulting vector is cached — client-side, in this browser's
+  IndexedDB. Off by default; falls back to fully offline keyword search
+  whenever it's off, unconfigured, or unavailable.
+- **Server LLM proxy** (on by default once signed in with a backend
+  configured): your question, retrieved memories, and the system prompt
+  are sent to this mind's own Supabase project, which relays them to the
+  configured frontier model using **platform-held** keys — your own API
+  key never leaves this browser unless you explicitly turn on **Developer
+  mode**, which calls the provider directly instead and is the only path
+  that ever uses your own key.
+
+Owner-defined refusal topics (Settings → "Topics my clone must refuse to
+discuss") and the standing self-identification-as-a-clone /
+no-impersonation rule are enforced on every reply and cannot be turned off.
+Refusal topics are intentionally **not** treated as a secret — they're
+exported with the mind bundle so a purchased/imported mind keeps the same
+boundaries its seller set.
 
 ## Take it to production
 
@@ -35,16 +62,23 @@ src/
   styles/theme.css        ALL brand tokens (rebrand here)
   lib/store.js            vault store + growth metrics + bundle export
   lib/links.js            wiki-link parser, backlinks, graph builder
-  lib/persona.js          mind-context builder + Anthropic API call
+  lib/retrieval.js        BM25/semantic hybrid retrieval + knowledge gaps
+  lib/embeddings.js       embedding cache (Dexie) + cosine similarity
+  lib/persona.js          mind pipeline: safety -> retrieve -> prompt -> cite
+  lib/personaProfile.js   auto-maintained "who I am" profile note
+  lib/personaSafety.js    refusal pre-filter + always-on safety block
+  lib/llm.js              multi-provider adapter: proxy / dev-mode / error
   lib/marketplace.js      listing/buy/sell client logic (E2E-encrypted)
   lib/auth.js             sign up/in, profile bootstrap, keypair publish
   lib/agreement.js        plain-language transfer agreement (pure fn)
   lib/transferState.js    transfer status state machine (client mirror)
   components/             Sidebar, Editor, GraphView, ContextPanel,
                           PersonaChat, Marketplace, AuthPanel, Settings
-supabase/migrations/      ordered SQL migrations (marketplace, sync, RLS)
+supabase/migrations/      ordered SQL migrations (marketplace, sync, RLS,
+                          pgvector + usage metering)
 supabase/functions/       Edge Functions: create-transfer, deliver-key,
                           get-bundle-url, confirm-import, dispute-transfer,
-                          delete-account, export-account (+ _shared/)
+                          delete-account, export-account, llm-proxy, embed
+                          (+ _shared/, incl. usage.ts metering)
 PLAN.md                   production build plan for Claude Code (Opus 4.8)
 ```

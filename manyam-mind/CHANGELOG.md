@@ -490,3 +490,146 @@ with one product-scope change made by the owner on this date:
 
 `npm run lint`, `npm run typecheck`, `npm test` (140 tests, 17 files), and
 `npm run build` all pass.
+
+## Phase 4 — Persona engine v3 — 2026-07-08
+
+Per PLAN.md §4, built against the same live Supabase project as Phase 3. All
+five preserved interfaces (`persona.js`: `askPersona`/`nextInterviewQuestion`/
+`absorbAnswer`/`buildSystemPrompt`/`IDENTITY_TITLE`; `retrieval.js`:
+`retrieve`/`chunkVault`/`knowledgeGaps`; `llm.js`: `chat`/`PROVIDERS`) keep
+their names and purpose; `retrieve()` and `absorbAnswer()` are now `async`
+(both already only had async callers) — documented at each definition.
+Deleted `src/lib/providers.js`, a dead duplicate of `llm.js` with a
+divergent API and zero imports anywhere in the codebase (verified by grep
+before removal).
+
+- **Embedding retrieval, env-gated with graceful BM25 fallback (§4.1).**
+  New `src/lib/embeddings.js` — a client for the new `embed` Edge Function.
+  `chunkKey(noteId, text)` (a fast djb2 hash) is the cache key in a new
+  Dexie `vectors` table (`src/lib/db.js`, `db.version(2)`:
+  `{chunkKey, noteId, vector, model, updatedAt}`), so an edited chunk gets a
+  new key (re-embedded) while an untouched chunk stays a cache hit forever
+  — covered by `embeddings.test.js`'s cache-invalidation tests. Cosine
+  similarity runs in plain JS (`cosineSimilarity`). `retrieval.js`'s
+  `retrieve()` keeps its call shape but is now `async`: when the owner has
+  opted in (`persona.semanticRetrieval`), the backend is configured, and
+  at least half of the vault's chunks already have a cached vector
+  (`SEMANTIC_MIN_COVERAGE`), it embeds the live query and scores
+  `0.6·cosine + 0.4·normalized_synaptic_strength` (PLAN.md §4.1 exactly);
+  otherwise (or if the live query-embed call fails — offline, rate
+  limited, no provider configured) it falls back to the original v2
+  BM25×0.7 + strength×0.3 blend, unchanged. New `retrievalMode(state)`
+  reports `'semantic'|'lexical'` for the UI without spending a query embed.
+  Background refresh (`scheduleEmbeddingRefresh`, idle + 4s debounce) is
+  wired from `main.jsx`'s existing `vault.subscribe` callback, gated on
+  signed-in (tracked via `auth.onAuthChange`) + `persona.semanticRetrieval`.
+  New Edge Function `supabase/functions/embed/index.ts` (authed): Voyage AI
+  (`VOYAGE_API_KEY`, voyage-3-lite) if set, else OpenAI (`OPENAI_API_KEY`,
+  text-embedding-3-small), else 501 `no embedding provider configured`;
+  meters usage via the new `_shared/usage.ts`. New migration
+  `0005_pgvector.sql`: `create extension vector`, `mind_chunks` (id,
+  user_id, note_id, chunk_key, scope, `content` — **left NULL in this
+  phase**, embedding vector(1024), updated_at) with an ivfflat index and
+  owner-only RLS — provisioned for Phase 5's server-side retrieval, not
+  written to by the Phase 4 client at all (the client only ever caches
+  vectors in Dexie). **Honest privacy note**: the E2E vault stays E2E;
+  turning on Settings → "Semantic retrieval (sends note text to the
+  embedding provider transiently)" (default **off**) sends each opted-in
+  chunk's text to the configured provider transiently, purely to compute a
+  vector — the function never logs or stores that text.
+
+- **Persona profile (§4.2).** New `src/lib/personaProfile.js`. The
+  profile is itself a note titled `Persona Profile` (like Identity Core),
+  auto-maintained: `regenerateProfile(state, llmCall)` distills the
+  vault's strongest notes (`topNotes`, by synaptic strength, top 8) into a
+  ~300-word "who I am" doc via one injected LLM call (never imports
+  `llm.js` directly, so it's trivially testable with a fake and carries no
+  routing/auth opinion), and stores it with an HTML-comment banner +
+  embedded fingerprint (`vaultFingerprint` — sorted `id@updatedAt` pairs
+  of the top-note set). `profileStale(state)` is true when there's no
+  profile yet, or more than 20% of the fingerprint's entries changed
+  (`DRIFT_THRESHOLD`) — membership churn and content edits both count.
+  `profileText(state)` strips the banner for injection.
+  `persona.js buildSystemPrompt` injects `=== PERSONA PROFILE ===` right
+  after Identity Core. PersonaChat gained a status row: retrieval mode
+  badge + "profile: fresh/stale" badge with a "Regenerate profile" button
+  when stale, wired to `regenerateProfile` bound through `llm.chat`'s
+  normal routing (so regeneration itself goes through the same
+  proxy/dev-mode/error path as any other prompt). The note remains fully
+  owner-editable like any other; regeneration only overwrites it, it never
+  locks it.
+
+- **Server LLM proxy + metering (§4.3).** New Edge Function
+  `supabase/functions/llm-proxy/index.ts` (authed): forwards
+  `{provider, model, system, messages, maxTokens}` to
+  Anthropic/OpenAI/Gemini using **platform** keys
+  (`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`, this function's
+  own env — never a user's), returns `{content}`. New
+  `supabase/functions/_shared/usage.ts`: `enforceDailyCap` (throws
+  `UsageCapExceededError` → 429, checked *before* calling the provider)
+  and `recordUsage` (appends to the new `usage_events` table — migration
+  0005, service-role-only insert, owner-only select RLS), sharing one cap
+  (env `LLM_DAILY_TOKEN_CAP`, default 200000) across `llm`/`embed` kinds so
+  switching call types can't dodge it. `llm.js`'s `chat()` keeps its name
+  and options-object shape but is now a router
+  (`resolveRoute({persona, backendConfigured, signedIn})`, exported and
+  unit-tested as the routing matrix): backend configured + signed in + NOT
+  developer mode → `llm-proxy`; developer mode on with a key set → the
+  original v1/v2 direct browser call (moved into internal `chatDirect`,
+  byte-for-byte the same three provider branches as before); otherwise a
+  clear error explaining both paths, thrown before any network call. The
+  browser-key path is thus reachable **only** behind the new persona
+  setting `developerMode` (default **false**). Settings gained a
+  "Developer mode" toggle with an honest explanation; the per-provider API
+  key fields now render only when it's on.
+
+- **Persona features (§4.4).** Citations: unchanged parsing, but
+  `buildSystemPrompt` now also lists the retrieved chunks' note titles
+  explicitly ("citing only titles from this list: …") for citation
+  fidelity. Interview mode: `absorbAnswer` (now `async`) runs `retrieve()`
+  against the new answer's text and appends up to two `See also [[Title]]`
+  lines for notes scoring above a confidence threshold
+  (`SEE_ALSO_MIN_SCORE`, deduplicated by note, best-effort — a lookup
+  failure never blocks absorbing the answer); `persona.test.js` covers the
+  threshold, the two-suggestion cap, dedup, and the failure path. Buyer-
+  facing imported minds: `store.js exportBundle()` now stamps
+  `persona.exportedBy` with the origin owner's clone name the *first* time
+  a mind is exported (preserved through re-export if a buyer later
+  re-lists it); `importBundle()` sets `persona.imported = true`
+  unconditionally. `buildSystemPrompt` adds an explicit imported-mind
+  framing sentence when both are set ("You are a mind clone of `<origin>`,
+  now owned by whoever is chatting with you today…"), and
+  `PersonaChat.jsx`'s header shows an "imported mind" badge.
+
+- **Safety rails (§4.5).** New `src/lib/personaSafety.js`:
+  `checkRefusal(question, topics)` is a cheap, local, no-LLM-call
+  substring pre-filter that short-circuits an obviously-excluded topic
+  with a standard refusal line before `askPersona` even calls `retrieve()`
+  or `chat()` (unit-tested, and covered end-to-end in `persona.test.js`);
+  `buildSafetyBlock(topics)` is the always-on system-prompt block —
+  clone self-identification, a standing refusal of impersonation-for-fraud,
+  and the owner's excluded-topics list — injected into **every**
+  `buildSystemPrompt` call unconditionally, with no persona setting able
+  to suppress it. `persona.refusalTopics` (Settings: a comma-separated
+  field, `parseRefusalTopics`) is deliberately **not** stripped by
+  `exportBundle`/`importBundle` the way API keys are — PLAN.md §4.5 wants
+  a seller's refusal boundaries to survive into a buyer's copy of the mind.
+
+- **Tests.** 69 new (23 files total): `personaSafety.test.js` (refusal
+  pre-filter matching/case-insensitivity/blank-topic handling, safety
+  block content), `personaProfile.test.js` (fingerprint drift math,
+  staleness thresholds, regeneration overwrite-in-place), `embeddings.test.js`
+  (chunkKey stability/uniqueness, cosine similarity, cache
+  hit/miss/re-embed-on-change, coverage, prune), `retrieval.test.js`
+  (semantic path with injected fake vectors, every fallback trigger —
+  low coverage, failed query embed, opt-out, unconfigured backend — and
+  the unchanged lexical/chunking/gap-detection behavior), `llm.test.js`
+  (the full `resolveRoute` matrix plus `chat()` dispatch to proxy/direct/
+  error), and `persona.test.js` (safety block presence in every prompt,
+  citation title list, imported-mind framing in both directions, the
+  refusal pre-filter short-circuit, and the see-also suggestion threshold/
+  cap/dedup/failure-path). All 140 pre-existing tests untouched and
+  passing.
+
+`npm run lint`, `npm run typecheck`, `npm test` (209 tests, 23 files), and
+`npm run build` all pass.

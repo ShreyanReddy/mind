@@ -31,6 +31,11 @@ function defaultPersona() {
     provider: 'anthropic',
     model: 'claude-sonnet-4-6',
     keys: { anthropic: '', openai: '', gemini: '' }, // browser-only, never exported
+    developerMode: false, // PLAN.md §4.3 — the browser-key path above only runs when this is on
+    semanticRetrieval: false, // PLAN.md §4.1 — opt-in; sends note text to the embedding provider transiently
+    refusalTopics: [], // PLAN.md §4.5 — owner-excluded topics; intentionally NOT stripped on export
+    exportedBy: null, // PLAN.md §4.4 — stamped at first export; the mind's origin owner, carried through import
+    imported: false, // PLAN.md §4.4 — true once this vault arrived via importBundle (buyer-facing framing)
   }
 }
 
@@ -518,9 +523,19 @@ export const vault = {
     return note
   },
 
-  /** Export the whole mind as a portable JSON bundle — the unit of transfer/sale. */
+  /**
+   * Export the whole mind as a portable JSON bundle — the unit of
+   * transfer/sale. Stamps `persona.exportedBy` with the origin owner label
+   * the FIRST time a mind is exported (PLAN.md §4.4) — if it's already set
+   * (this vault was itself imported, then re-exported), the original
+   * lineage is preserved rather than overwritten with the current owner's
+   * clone name. `refusalTopics` is deliberately NOT stripped — PLAN.md
+   * §4.5 requires the seller-defined excluded-topics list to ship baked
+   * into the bundle, unlike secrets (apiKey/keys), which always are.
+   */
   exportBundle() {
-    const { apiKey, keys, ...persona } = state.persona // never export secrets
+    const { apiKey, keys, ...personaRest } = state.persona // never export secrets
+    const persona = { ...personaRest, exportedBy: personaRest.exportedBy || personaRest.name }
     return {
       format: 'manyam-mind/1',
       exportedAt: new Date().toISOString(),
@@ -549,9 +564,12 @@ export const vault = {
 
     // Never import secrets, even from a malicious/malformed bundle — keys
     // and legacy apiKey are dropped, not merged, regardless of what the
-    // bundle claims.
+    // bundle claims. `imported: true` marks this vault as a buyer-facing
+    // mind from here on (PLAN.md §4.4 — PersonaChat shows an "imported
+    // mind" badge and the system prompt frames answers accordingly), and
+    // is set unconditionally here regardless of what the bundle contains.
     const { apiKey, keys, ...importedPersona } = bundle.persona || {}
-    state.persona = { ...state.persona, ...importedPersona }
+    state.persona = { ...state.persona, ...importedPersona, imported: true }
     state.activity = []
     markMetaDirty('persona')
     scheduleFlush()
