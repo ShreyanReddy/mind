@@ -10,6 +10,7 @@
 import { db } from './db.js'
 import { linkIndex } from './linkIndex.js'
 import { parseLinks, extractTags } from './links.js'
+import { nodeMass, edgeWeight, coEditCounts, consolidate, pairKey } from './growth.js'
 
 const LOCALSTORAGE_KEY = 'manyam.vault.v1'
 const FLUSH_DEBOUNCE_MS = 300
@@ -265,6 +266,35 @@ function applySnapshot(note, snap) {
   markNoteDirty(note.id)
 }
 
+/* ---------------- consolidation (PLAN.md §2.2) ---------------- */
+
+// Edges whose endpoints have both been inactive for 90 days fade — visually
+// thinned, never removed. Recomputed on idle (requestIdleCallback with a
+// setTimeout fallback); it only refreshes this flag set, no data mutation.
+let fadedEdgeKeys = new Set()
+let consolidationQueued = false
+
+function queueConsolidation() {
+  if (consolidationQueued) return
+  consolidationQueued = true
+  const run = () => {
+    consolidationQueued = false
+    const lastUsed = new Map()
+    for (const n of state.notes) lastUsed.set(n.id, n.updatedAt || 0)
+    for (const a of state.activity) {
+      if ((lastUsed.get(a.noteId) || 0) < a.t) lastUsed.set(a.noteId, a.t)
+    }
+    const g = linkIndex.graph(state.notes, [])
+    const next = new Set()
+    for (const e of consolidate(g.edges, lastUsed, Date.now())) {
+      if (e.faded) next.add(pairKey(e.a, e.b))
+    }
+    fadedEdgeKeys = next
+  }
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 2000 })
+  else setTimeout(run, 250)
+}
+
 /* ---------------- vault API ---------------- */
 
 export const vault = {
@@ -416,6 +446,51 @@ export const vault = {
   /* ---- incremental graph (PLAN.md §1.5) ---- */
   graph() {
     return linkIndex.graph(state.notes, state.activity)
+  },
+
+  /* ---- growth-enriched graph (PLAN.md §2.2) ---- */
+  /**
+   * The graph with growth semantics applied: nodes carry mass / radius01 /
+   * brightness (edits + degree + recency-decayed activity, growth.js),
+   * edges carry weight (link count × co-edit frequency) and the faded flag
+   * from the idle consolidation pass. GraphView consumes this instead of
+   * computing visuals ad hoc.
+   */
+  graphEnriched() {
+    const g = linkIndex.graph(state.notes, state.activity)
+    const now = Date.now()
+    const byId = new Map(state.notes.map((n) => [n.id, n]))
+    const eventsByNote = new Map()
+    for (const a of state.activity) {
+      let list = eventsByNote.get(a.noteId)
+      if (!list) eventsByNote.set(a.noteId, (list = []))
+      list.push(a)
+    }
+    const co = coEditCounts(state.activity)
+
+    const nodes = g.nodes.map((n) => {
+      const note = byId.get(n.id)
+      const { mass, radius, brightness } = nodeMass(note, {
+        degree: n.degree,
+        activity: eventsByNote.get(n.id) || [],
+        now,
+      })
+      return {
+        ...n,
+        folder: note?.folder || '',
+        tags: note?.tags || [],
+        aliases: note?.aliases || [],
+        mass,
+        radius01: radius,
+        brightness,
+      }
+    })
+    const edges = g.edges.map((e) => {
+      const key = pairKey(e.a, e.b)
+      return { ...e, weight: edgeWeight(e.w, co.get(key) || 0), faded: fadedEdgeKeys.has(key) }
+    })
+    queueConsolidation()
+    return { nodes, edges }
   },
 
   /* ---- daily notes & templates (PLAN.md §1.4) ---- */

@@ -160,3 +160,28 @@ describe('localStorage -> Dexie migration', () => {
     expect(vault.get().notes.some((n) => n.title === 'Welcome to your mind')).toBe(true)
   })
 })
+
+describe('graphEnriched (PLAN.md §2.2)', () => {
+  it('returns growth-model nodes (mass/radius01/brightness) and weighted edges', async () => {
+    const vault = await freshVault()
+    const a = vault.createNote('Growth source')
+    vault.updateNote(a.id, { body: 'links to [[Welcome to your mind]] #growth', folder: 'Lab' })
+
+    const g = vault.graphEnriched()
+    const node = g.nodes.find((n) => n.id === a.id)
+    expect(node.mass).toBeGreaterThan(1)
+    expect(node.radius01).toBeGreaterThan(0)
+    expect(node.radius01).toBeLessThanOrEqual(1)
+    expect(node.brightness).toBeGreaterThan(0)
+    expect(node.brightness).toBeLessThanOrEqual(1)
+    expect(node.folder).toBe('Lab')
+    expect(node.tags).toContain('growth')
+
+    const edge = g.edges.find((e) => e.a === a.id || e.b === a.id)
+    // create + edit events land in the same 1-hour window as the linked
+    // note's seed activity is absent, but the co-edit boost never shrinks
+    // the weight below the raw link count
+    expect(edge.weight).toBeGreaterThanOrEqual(edge.w)
+    expect(edge.faded).toBe(false) // fresh edits — consolidation leaves it alive
+  })
+})

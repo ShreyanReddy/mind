@@ -234,3 +234,117 @@ is the one thing every component depends on.
 
 `npm run lint`, `npm run typecheck`, `npm test` (65 tests, 9 files), and
 `npm run build` all pass.
+
+## Phase 2 — The living graph, production grade — 2026-07-07
+
+Per PLAN.md §2. `<GraphView onOpenNote={...} />` keeps its exact component
+API and its soul — glow, pulses on recent edits, traveling sparks on new
+synapses — while the internals were rebuilt for 5k nodes.
+
+- **Barnes-Hut physics at scale (§2.1), new `src/lib/quadtree.js` +
+  `src/lib/graphPhysics.js`.** `quadtree.js` is a pure Barnes-Hut quadtree
+  (insert points with mass; approximate inverse-square repulsion per node
+  with theta 0.85; coincident points aggregate at a max-depth leaf instead
+  of recursing forever). `graphPhysics.js` is the shared fixed-timestep
+  step — BH repulsion + springs + centering + damping — with the original
+  feel preserved: spring rest length still shrinks with edge weight
+  (`90 − min(30, w·6)`), damping still 0.85, and the pair force
+  `k·mᵃ·mᵇ/d²` divided by the node's own mass so unit-mass behavior matches
+  the old sim exactly while heavier neurons claim more space. Tested:
+  BH vs naive O(n²) summary stats on a 400-point random layout (mean
+  magnitude error < 10%, mean direction cosine > 0.97), a CI perf budget
+  (one full force pass over 5,000 nodes < 100ms), energy decay from the
+  early peak to a settled layout, linked-nodes-end-closer clustering,
+  pinned-node immobility, and syncSim position preservation.
+
+- **Simulation in a Web Worker, new `src/workers/graphSim.js`.** Created
+  via the Vite idiom `new Worker(new URL('../workers/graphSim.js',
+  import.meta.url), { type: 'module' })`. The worker owns the sim state:
+  `{type:'sync'}` topology snapshots in, transferable Float32Array position
+  buffers out at ~60Hz while the layout is hot, throttling to 250ms once
+  the layout energy settles (waking on any sync/pin). Dragging pins the
+  node in the worker so it follows the pointer. Where `typeof Worker ===
+  'undefined'` (jsdom, old browsers) GraphView steps the *same*
+  `graphPhysics.js` module on the main thread — the physics is tested even
+  though the worker itself can't run under jsdom.
+  **OffscreenCanvas decision:** rendering stays on the main-thread canvas.
+  Drawing needs live theme tokens, labels, hover/focus/search state — and
+  the expensive part (the simulation) is already off the main thread, so
+  OffscreenCanvas would have added a second message protocol and
+  worker-side theming for no measurable gain. PLAN.md says "where
+  supported"; here it is deliberately unused.
+
+- **Growth semantics (§2.2), new `src/lib/growth.js` + `vault.graphEnriched()`.**
+  - `nodeMass(note, {degree, activity, now})` = `1 + 0.6·log1p(edits) +
+    0.25·degree + 0.5·recency`, where recency = Σ `exp(-(now−t)/τ)` over the
+    note's activity events, τ = 14 days. Returns raw mass plus normalized
+    visual `radius`/`brightness` in [0,1] (brightness leans on recency, so
+    a freshly-worked neuron glows even while small).
+  - `edgeWeight(linkCount, coEditCount)` = `linkCount × (1 +
+    log1p(coEditCount))`. `coEditCounts(activity)` counts, per pair of
+    notes, how often they were edited within the same 1-hour window using a
+    sliding window pointer — O(activity·window), never O(n²) over pairs —
+    returning a Map keyed by `pairKey(a, b)`.
+  - `consolidate(edges, lastUsed, now)` flags edges whose endpoints have
+    BOTH been inactive for 90 days as `faded: true`. Faded synapses thin to
+    a floor opacity (`FADE_FLOOR_ALPHA`) but are never removed — old
+    memories fade, they don't die. In the store this runs on idle
+    (`requestIdleCallback`, `setTimeout` fallback) and only refreshes a
+    flag set; no data mutation.
+  - `vault.graphEnriched()` serves GraphView nodes with
+    mass/radius01/brightness/folder/tags and edges with weight/faded, so
+    the component computes no growth math ad hoc. `vault.graph()` is
+    unchanged for existing callers.
+
+- **Interactions (§2.3), in `GraphView.jsx`.**
+  - *Local graph mode:* a "Whole mind" / "Around this note" toggle in the
+    HUD. Local mode shows the 2-hop neighborhood (`growth.neighborhood`,
+    tested) of the most recently active note; clicking a node re-centers on
+    it (clicking the already-centered node — or pressing Enter — opens it).
+  - *Time-lapse replay:* "Watch your mind grow" — a play/pause + scrubber
+    bar reading the FULL durable activity log from Dexie (`db.activity`,
+    up to 5,000 events; the in-memory copy only keeps 500). At scrub
+    position T only notes born ≤ T appear, node sizes are recomputed from
+    activity ≤ T, and play sweeps the full range in ~8s.
+    **Documented approximation:** the log records per-note events, and a
+    `link` event names the note that gained a link but not which edge it
+    created — so an edge's birth is approximated as the earliest `link`
+    event on either endpoint once both endpoints exist, falling back to
+    "the moment both endpoints exist" when no link event survives in the
+    capped log (`growth.timelapseFrame`, tested). Exiting returns to live
+    mode; sim re-syncs are throttled to ~90ms while scrubbing with a
+    trailing sync for the final position.
+  - *Search-to-highlight:* a HUD search input; nodes matching by
+    title/alias/tag substring glow brighter while non-matches dim to 20%
+    (edges dim unless both endpoints match); Enter cycles matches and pans
+    each one to center, announced via the live region.
+  - *Cluster coloring:* nodes are colored by folder — the folder name
+    hashes to a stable hue rotation applied to the brand token color in HSL
+    space (new pure `src/lib/palette.js`, tested; no hardcoded hex in JS —
+    the base color is always read from `--glow-syn`/`--glow-mind` at
+    runtime, so cluster colors follow a rebrand automatically). Legend
+    chips show folder → color for the largest six folders.
+
+- **Accessibility (§2.4).** The canvas is focusable (`tabIndex=0`): arrow
+  keys move a visible dashed focus ring to the nearest node in the pressed
+  direction (cone-limited nearest-neighbor), Enter opens the focused note,
+  Escape clears, and the focused title + connection count is announced
+  through a visually-hidden `aria-live` region. Under
+  `prefers-reduced-motion: reduce` there is no animation loop at all: the
+  simulation runs to convergence once per data change on the main thread
+  (`runToRest`, ≤300 steps), the layout is drawn statically and redrawn
+  only on data/viewport change, and pulses/sparks/time-lapse autoplay are
+  disabled (the scrubber still works by hand).
+
+- **Tests.** 39 new (13 files total): `quadtree.test.js` (accuracy vs
+  naive, perf budget, degenerate inputs), `graphPhysics.test.js` (energy
+  decay, stable/clustered layout, convergence, pinning, sync semantics),
+  `growth.test.js` (mass monotonicity, τ decay, edge-weight formula,
+  co-edit windows/dedup/perf, consolidation boundary + never-removes +
+  no-mutation, 2-hop neighborhood, time-lapse frames incl. the edge-birth
+  approximation), `palette.test.js` (hash stability, token parsing, hue
+  rotation), and a `graphEnriched` shape test in `store-vault.test.js`.
+  All 65 pre-existing tests untouched and passing.
+
+`npm run lint`, `npm run typecheck`, `npm test` (104 tests, 13 files), and
+`npm run build` all pass.

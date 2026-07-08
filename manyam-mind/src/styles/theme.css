@@ -171,6 +171,51 @@ input:focus, textarea:focus { outline: none; border-color: var(--glow-syn); }
 }
 .graph-legend .l-note::before { background: var(--glow-syn); }
 .graph-legend .l-hub::before { background: var(--glow-mind); }
+.graph-legend .l-folder::before { content: none; }
+.graph-legend .l-folder i {
+  display: inline-block; width: 8px; height: 8px;
+  border-radius: 50%; margin-right: 7px; vertical-align: baseline;
+  /* background set inline — derived at runtime from the brand tokens */
+}
+
+/* graph HUD controls (PLAN.md §2.3) */
+.graph-wrap canvas:focus-visible { outline: 2px solid var(--glow-syn); outline-offset: -2px; }
+.graph-controls {
+  position: absolute; top: 10px; right: 12px;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end;
+  font-size: 12px;
+}
+.graph-controls button { padding: 4px 10px; font-size: 12px; }
+.graph-controls button.on { color: var(--glow-syn); border-color: var(--glow-syn); }
+.graph-controls button:disabled { opacity: 0.5; cursor: default; }
+.graph-scope { display: inline-flex; }
+.graph-scope button { border-radius: var(--radius) 0 0 var(--radius); }
+.graph-scope button + button { border-radius: 0 var(--radius) var(--radius) 0; border-left: none; }
+.graph-search { width: 170px; padding: 4px 10px; font-size: 12px; }
+.graph-timelapse {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px;
+  background: var(--ink-1); border: 1px solid var(--ink-2); border-radius: var(--radius);
+  padding: 8px 14px; min-width: 46%;
+}
+.graph-timelapse input[type='range'] { flex: 1; padding: 0; background: transparent; border: none; accent-color: var(--glow-syn); }
+.graph-timelapse button { padding: 2px 10px; font-size: 12px; }
+.graph-timelapse .lapse-label {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--paper-dim); white-space: nowrap;
+}
+.graph-tooltip {
+  position: absolute; z-index: 20; pointer-events: none;
+  background: var(--ink-1); border: 1px solid var(--ink-2); border-radius: var(--radius);
+  color: var(--paper); font-size: 12px; padding: 4px 9px; max-width: 260px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+}
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0;
+  clip-path: inset(50%); overflow: hidden; white-space: nowrap;
+}
 
 /* ---------- backlinks / context ---------- */
 .ctx-section { padding: 12px 14px; border-bottom: 1px solid var(--ink-2); }
