@@ -94,16 +94,21 @@ These identifiers are wire/storage formats, not brand copy — leave them:
 
 - `src/lib/db.js` — the Dexie database name `manyam-mind` (an existing
   user's whole vault lives under it)
-- `src/lib/store.js` — the bundle `format: 'manyam-mind/1'` (and the
-  accepted legacy `'synapse-mind/1'`); a rename here would orphan every
-  previously exported mind
+- `src/lib/store.js` — `importBundle()` accepts the legacy
+  `'manyam-mind/1'` and `'synapse-mind/1'` format tags forever; exports are
+  stamped `'prayan-mind/1'` (renamed 2026-07-08 along with the directory,
+  since no production bundles existed yet)
 - `src/lib/store.js` — the one-time-migration localStorage key
   `manyam.vault.v1`
 - `src/lib/sync.js` — the CRDT origin tag `manyam-remote`
-- The `manyam-mind/` directory name and CI working-directory paths (repo
-  layout, not user-facing)
 
 History: the product shipped Phases 0–5 as "Manyam Mind" and was renamed
 to **Prayan** by owner decision on 2026-07-08 (this procedure was executed
 then; desktop identifiers `com.prayan.app` / crate `prayan` were still
-unreleased, so they were renamed outright).
+unreleased, so they were renamed outright). Later the same day the
+`manyam-mind/` directory itself was renamed to `prayan/` (with all CI and
+docs paths updated) and the export format tag moved to `prayan-mind/1` —
+both were safe because nothing had shipped; the Dexie database name,
+localStorage migration key, and CRDT origin tag remain the only
+'manyam'-flavored identifiers, kept because renaming them would destroy
+existing local vault data for zero user-visible gain.

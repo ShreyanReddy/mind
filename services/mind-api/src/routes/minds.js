@@ -22,7 +22,7 @@ function esc(s = '') {
  * Renders the public mind page as one self-contained HTML document — no
  * external CSS/JS/font requests, dark palette. The inline `<style>` below
  * hardcodes a small palette that intentionally MIRRORS the tokens in
- * manyam-mind/src/styles/brand.css (--ink-0 #1e1e1e, --ink-1 #262626,
+ * prayan/src/styles/brand.css (--ink-0 #1e1e1e, --ink-1 #262626,
  * --ink-2 #363636, --glow-syn #a882ff, --paper #dcddde) — this is a
  * server-rendered document, not an app component, so CLAUDE.md's "no
  * hardcoded colors in components" rule (which targets src/components/*)

@@ -547,7 +547,7 @@ export const vault = {
     const { apiKey, keys, ...personaRest } = state.persona // never export secrets
     const persona = { ...personaRest, exportedBy: personaRest.exportedBy || personaRest.name }
     return {
-      format: 'manyam-mind/1',
+      format: 'prayan-mind/1',
       exportedAt: new Date().toISOString(),
       persona,
       notes: state.notes,
@@ -555,9 +555,11 @@ export const vault = {
   },
 
   importBundle(bundle) {
-    // 'synapse-mind/1' is the legacy format tag from before the rebrand —
-    // bundles exported under the old name must still import cleanly.
-    if (bundle?.format !== 'manyam-mind/1' && bundle?.format !== 'synapse-mind/1') {
+    // 'manyam-mind/1' and 'synapse-mind/1' are legacy format tags from
+    // before the two rebrands — bundles exported under the old names must
+    // still import cleanly, forever.
+    const KNOWN_FORMATS = ['prayan-mind/1', 'manyam-mind/1', 'synapse-mind/1']
+    if (!KNOWN_FORMATS.includes(bundle?.format)) {
       throw new Error('Not a Prayan mind bundle')
     }
     if (!Array.isArray(bundle.notes)) throw new Error('Bundle notes must be an array')

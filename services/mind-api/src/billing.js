@@ -1,7 +1,7 @@
 // Billing-provider interface — PLAN.md §5.4, as amended 2026-07-08.
 //
 // PRODUCT DECISION: Stripe metered billing is ON HOLD, same as the main
-// app's marketplace escrow (see manyam-mind/supabase/functions/_shared/
+// app's marketplace escrow (see prayan/supabase/functions/_shared/
 // payments.ts for the sibling decision there). Today, monetization is
 // metering + free-tier limits + an owner-set price that's stored and
 // DISPLAYED (minds.price_per_query_cents, returned in /ask's 429 body and
@@ -38,7 +38,7 @@ export class InternalBillingStub {
  * query (stripe.billing.meterEvents.create(...)), keyed to the mind
  * owner's connected account, with PLATFORM_FEE_BPS applied as an
  * application_fee_amount on the resulting invoice item — mirroring how
- * manyam-mind/supabase/functions/_shared/payments.ts's StripeStub documents
+ * prayan/supabase/functions/_shared/payments.ts's StripeStub documents
  * its own reactivation path for escrow.
  */
 export class StripeMeteringStub {

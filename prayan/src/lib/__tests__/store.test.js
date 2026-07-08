@@ -56,7 +56,7 @@ describe('exportBundle', () => {
     const vault = await freshVault()
     const bundle = vault.exportBundle()
 
-    expect(bundle.format).toBe('manyam-mind/1')
+    expect(bundle.format).toBe('prayan-mind/1')
     expect(Array.isArray(bundle.notes)).toBe(true)
     expect(bundle.notes.length).toBeGreaterThan(0)
   })
@@ -75,11 +75,18 @@ describe('importBundle', () => {
     expect(after.notes).toHaveLength(before.notes.length)
   })
 
-  it('accepts the current manyam-mind/1 format', async () => {
+  it('accepts the current prayan-mind/1 format', async () => {
     const vault = await freshVault()
-    const bundle = { format: 'manyam-mind/1', persona: { name: 'X' }, notes: [] }
+    const bundle = { format: 'prayan-mind/1', persona: { name: 'X' }, notes: [] }
     expect(() => vault.importBundle(bundle)).not.toThrow()
     expect(vault.get().persona.name).toBe('X')
+  })
+
+  it('accepts the legacy manyam-mind/1 format (pre-Prayan rebrand)', async () => {
+    const vault = await freshVault()
+    const bundle = { format: 'manyam-mind/1', persona: { name: 'Legacy2' }, notes: [] }
+    expect(() => vault.importBundle(bundle)).not.toThrow()
+    expect(vault.get().persona.name).toBe('Legacy2')
   })
 
   it('accepts the legacy synapse-mind/1 format (the bug this test guards against)', async () => {

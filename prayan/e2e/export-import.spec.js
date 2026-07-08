@@ -33,7 +33,7 @@ test('export a mind bundle, verify it, import it into a fresh vault', async ({
 
   // The real artifact honors the wire format and the secrets invariant.
   const bundle = JSON.parse(readFileSync(bundlePath, 'utf8'))
-  expect(bundle.format).toBe('manyam-mind/1') // stable across the Prayan rebrand
+  expect(bundle.format).toBe('prayan-mind/1')
   expect(bundle.notes.some((n) => n.title === 'My Exported Thought')).toBe(true)
   expect(bundle.persona.keys).toBeUndefined()
   expect(bundle.persona.apiKey).toBeUndefined()

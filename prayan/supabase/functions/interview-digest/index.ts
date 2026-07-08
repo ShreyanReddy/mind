@@ -26,7 +26,7 @@
 //     $$ select net.http_post(
 //          url := '<project-ref>.functions.supabase.co/interview-digest',
 //          headers := jsonb_build_object('x-cron-secret', '<CRON_SECRET value>')
---        ) $$
+//        ) $$
 //   );
 //
 // EMAIL (Resend, PLAN.md's amended provider choice, 2026-07-08): inert

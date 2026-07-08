@@ -5,12 +5,12 @@ Node/Express service, deployed on **Railway** (owner decision, 2026-07-08;
 not a Supabase Edge Function — those stay reserved for marketplace/escrow).
 Each published mind becomes a hosted, queryable model at
 `POST /minds/:handle/ask`, backed by the same privacy-scoped, server-side
-retrieval pipeline described in `manyam-mind/PLAN.md` §5.
+retrieval pipeline described in `prayan/PLAN.md` §5.
 
 The server never holds plaintext PRIVATE vault content — it only ever reads
 `mind_chunks` rows the owner explicitly published as scope `mind` or
 `published` from the main app's Editor (see
-`manyam-mind/src/lib/mindPublish.js`).
+`prayan/src/lib/mindPublish.js`).
 
 ## Endpoints
 

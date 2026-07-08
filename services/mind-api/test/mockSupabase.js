@@ -1,5 +1,5 @@
 // A minimal chainable Supabase query-builder stand-in, shared across this
-// package's tests — same pattern as manyam-mind's src/lib/__tests__/
+// package's tests — same pattern as prayan's src/lib/__tests__/
 // marketplace.test.js, adapted for mind-api's own table shapes.
 import { vi } from 'vitest'
 
