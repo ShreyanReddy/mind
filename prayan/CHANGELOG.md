@@ -746,3 +746,156 @@ env-gated and inert without a key.
 `npm run lint`, `npm run typecheck`, `npm test` (221 tests, 25 files), and
 `npm run build` all pass for manyam-mind; `npm test` (90 tests, 12 files)
 passes for services/mind-api.
+
+## Phase 6 — Ship — 2026-07-08
+
+Per PLAN.md §6: desktop packaging, first-run onboarding, observability, a
+security review, and deploy — the last phase before this is a shipped
+product rather than a working prototype. Includes an owner-decided rebrand
+(Manyam Mind → Prayan) executed mid-phase, plus its necessary follow-up: the
+`manyam-mind/` directory itself renamed to `prayan/`.
+
+- **Tauri 2 desktop shell (§6.1), new `src-tauri/`.** A thin wrapper — no
+  product logic in Rust — around the same web frontend. `Cargo.toml` pulls
+  `tauri-plugin-dialog`, `tauri-plugin-fs`, and `tauri-plugin-persisted-scope`
+  (so a picked vault folder stays readable across restarts without
+  re-prompting); `tauri.conf.json` pins the window CSP
+  (`default-src 'self'`, no remote script/style origins beyond Google Fonts)
+  and ships `productName`/`identifier` as `Prayan`/`com.prayan.app`.
+  `capabilities/default.json` bounds the fs scope to `$HOME/**` and
+  `$DOCUMENT/**` — the outer limit; runtime access is narrowed further to
+  whatever folder the user explicitly picks via the dialog plugin. Icons
+  (`src-tauri/icons/*`) are generated from original artwork
+  (`src-tauri/app-icon.svg`) via `npx tauri icon`, never copied from another
+  app. CI gained a `desktop-check` job (`cargo check --locked` on every
+  push, Linux) and `.github/workflows/desktop.yml` (3-OS installer bundles —
+  Linux/macOS/Windows — on `workflow_dispatch` or a `v*` tag; unsigned for
+  now, documented in `docs/DESKTOP.md`). `fsvault.js` gained a second
+  backend behind its existing public API: `isTauri()` feature-detects the
+  shell, and when present, `connect`/`reconnect`/`exportAll`/
+  `loadFromFolder` route through the Tauri `dialog`/`fs`/`path` plugins
+  (dynamically imported, so the web bundle never loads them) operating on a
+  plain folder path instead of a `FileSystemDirectoryHandle`; the Dexie
+  meta row storing the connection is now `{ kind, handle|path }`, and
+  `reconnect()` still accepts the pre-desktop raw-handle shape for existing
+  users. 7 new tests in `fsvault.test.js` inject a fake `tauriModules()`
+  (`__setTauriModules`) to cover the Tauri path end to end under
+  jsdom/Node. Mobile has no shell yet; the interim story is the responsive
+  web layout — under 720px the app collapses to a single column with the
+  view ribbon as a bottom bar and the sidebar as an off-canvas drawer (topbar
+  hamburger, scrim), documented as an interim measure in `docs/DESKTOP.md`.
+
+- **First-run onboarding tour (§6.2), new `src/components/Onboarding.jsx` +
+  `src/lib/onboarding.js`.** A floating card, never a blocking modal — the
+  user works in the real app the whole time. Pure logic lives in
+  `onboarding.js`: `isFreshVault(state)` (true only for a genuinely new
+  vault — seed-note count or fewer, nothing edited more than once) gates the
+  tour so an existing mind, import, or long-lived vault is permanently opted
+  out the first time it's seen; `tourProgress(state, startIds)` — driven
+  live off `vault.subscribe` — counts notes created since the tour started
+  and detects the first `[[link]]` from one of those new notes that resolves
+  to a different note by title or alias. The tour walks welcome → write 3
+  notes → make 1 synapse → reveal the graph → done, dismissable
+  ("Skip tour") at every step; completion is a `TOUR_META_KEY` flag in Dexie
+  meta so it survives restarts and never re-triggers. 9 new unit tests cover
+  `isFreshVault` and `tourProgress` (creation counting, same-note self-links
+  ignored, alias resolution, links written into pre-existing notes not
+  counted).
+
+- **Observability (§6.3).** New `src/lib/telemetry.js`: usage metering is
+  **event counts only** — the payload is literally
+  `{ startedAt, events: { 'note.create': 3, ... } }`, no note text, titles,
+  queries, or user identifiers, ever. Disabled unless `VITE_TELEMETRY_URL`
+  is set, and always disabled when the browser sends Do Not Track;
+  `flush()` uses `sendBeacon` (falling back to a keepalive `fetch`) on a 60s
+  interval and on `pagehide`, with an injectable transport for tests and a
+  design that never throws — losing a telemetry batch can't affect the app.
+  6 new tests assert the payload shape itself can't carry content, not just
+  that it currently doesn't. `main.jsx` dynamically imports Sentry only when
+  `VITE_SENTRY_DSN` is configured (zero SDK bytes otherwise), with
+  `sendDefaultPii` and tracing both off. New Playwright suite
+  (`playwright.config.js` + `e2e/*.spec.js`) exercises the three critical
+  paths against the real production build (`vite build` + `vite preview`) in
+  real Chromium, no mocks: `onboarding-graph.spec.js` drives the create/
+  link/graph path through the tour itself; `export-import.spec.js` exports a
+  bundle, asserts the real downloaded artifact is tagged `prayan-mind/1` and
+  has no `persona.keys`/`apiKey`, then imports it into a fresh browser
+  profile; `marketplace.spec.js` covers the honest unauthenticated demo-mode
+  view and self-skips the live escrowed-sale flow unless `E2E_SUPABASE=1` is
+  set against a configured backend (documented as future work — the escrow
+  state machine itself is already covered by 36 unit tests from Phase 3).
+  `.github/workflows/ci.yml` gained an `e2e` job (installs Chromium,
+  uploads the Playwright report as an artifact on failure).
+
+- **Security review (§6.4), executed and documented in
+  `docs/SECURITY-REVIEW.md`** (a completed checklist with findings and
+  dispositions, not a template — re-run before any major release). RLS
+  audit via the Supabase security advisor plus a manual per-table read:
+  the one WARN (`vector` extension living in `public`) is fixed by
+  migration `0007_security_hardening.sql`, moving it into an `extensions`
+  schema (applied live; nothing in this codebase uses schema-qualified SQL
+  vector operators, so no query changes were needed) — while applying it,
+  this session also found and applied the previous phase's
+  `0006_minds.sql` migration, which had been written but never pushed to
+  the live project. Two advisor findings are accepted and documented
+  in-place rather than "fixed": `ask_cache`/`ask_usage`'s RLS-enabled/
+  no-policy posture (intentional — service-role-only, same pattern as
+  `transfers`/`transfer_events`), and the `public_minds` security-definer
+  view (the least-exposure option versus the alternatives, whitelisting 9
+  columns and a `published` filter — never `refusal_topics`/`voice_rating`).
+  A full key-lifecycle table documents where every secret in the system
+  lives, transits, and must never go. New `_shared/rateLimit.ts` — an
+  in-memory, per-user, per-isolate fixed window — is wired into all nine
+  authenticated Edge Functions (10/min on `create-transfer`/
+  `dispute-transfer`, 20/min on `deliver-key`/`confirm-import`, 30/min on
+  `get-bundle-url`/`embed`/`llm-proxy`, 3-6/hour on the GDPR
+  `delete-account`/`export-account` pair); its header comment documents the
+  real limitation — a cold start or second isolate resets the window, so
+  this blunts abuse rather than guaranteeing a hard cap, which is why the
+  token caps (`usage.ts`), state-machine validation, and RLS remain the
+  actual guarantees. Dependency scan: upgrading Vite 5 → 7 (and
+  `@vitejs/plugin-react` 4 → 5) clears GHSA-67mh-4wv8-2f99 (esbuild
+  dev-server request forwarding); `npm audit` now reports 0 vulnerabilities
+  in both `prayan` and `services/mind-api`, full unit + e2e suites green on
+  Vite 7.
+
+- **Rebrand: Manyam Mind → Prayan.** An owner decision executed the same
+  day, in two steps documented in `docs/REBRANDING.md` §5. First, every
+  user-facing surface: the wordmark and tagline in `App.jsx`, the page
+  title, the Tauri shell's `productName`/`identifier`/crate name
+  (`com.prayan.app` / `prayan`), the Mind API's public page, and
+  README/CLAUDE.md/PLAN.md/docs. Then, later the same day, the follow-up
+  this made necessary: the `manyam-mind/` directory itself renamed to
+  `prayan/`, with every CI workflow and doc path updated to match, and the
+  export format tag moved from `manyam-mind/1` to `prayan-mind/1` — safe
+  because no production bundles existed yet. Both `manyam-mind/1` and the
+  pre-rebrand legacy `synapse-mind/1` remain accepted forever on import
+  (`store.js importBundle()`). Deliberately **unchanged**, for data
+  compatibility, and called out explicitly: the Dexie database name
+  `manyam-mind`, the one-time-migration `localStorage` key
+  `manyam.vault.v1`, and the CRDT origin tag `manyam-remote` — renaming any
+  of these would silently orphan an existing user's local vault for zero
+  user-visible benefit.
+
+- **Deploy (§6.5).** This session found that NO Edge Functions had ever
+  been deployed to the live project — earlier phases wrote them but never
+  pushed them. All ten (`create-transfer`, `deliver-key`, `get-bundle-url`,
+  `confirm-import`, `dispute-transfer`, `delete-account`, `export-account`,
+  `embed`, `llm-proxy`, `interview-digest`) are now deployed and `ACTIVE`,
+  each bundled with its `_shared/` dependencies and each function's intended
+  `verify_jwt` setting preserved (`false` only for `interview-digest`, which
+  authenticates via the `x-cron-secret` header instead of a user session).
+  The first-ever deploy of `interview-digest` surfaced a real parse error —
+  a bare `--` SQL line inside its header comment block — fixed in source.
+  All 7 migrations (`0001` through `0007`, including the previously-unapplied
+  `0006_minds`) are now applied and in sync with the migration history in
+  `supabase/migrations/`. New `vercel.json` (Vite build, immutable asset
+  caching, security headers) and `docs/DEPLOY.md` (the three-piece deploy
+  runbook — Vercel app, Supabase backend, Railway mind-api — with the
+  live-project status and a post-deploy checklist).
+
+`npm run lint`, `npm run typecheck`, `npm test` (244 tests, 26 files), and
+`npm run build` all pass; `npm test` (90 tests, 12 files) passes for
+`services/mind-api`; Playwright e2e reports 3 passed (1 skipped — the live
+escrow spec, pending a dedicated e2e Supabase project); `cargo check
+--locked` is green for the Tauri shell.
