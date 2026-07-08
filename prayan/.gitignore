@@ -12,3 +12,5 @@ src-tauri/gen
 # playwright
 test-results
 playwright-report
+.vercel
+.env*
