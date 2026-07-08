@@ -2,7 +2,7 @@
   "name": "mind-api",
   "private": true,
   "version": "0.1.0",
-  "description": "Manyam Mind — Mind-as-a-Service (PLAN.md Phase 5): a Node/Express service hosting POST /minds/:handle/ask, each mind's own queryable endpoint. Deployed to Railway (see railway.json), not a Supabase Edge Function — owner decision 2026-07-08.",
+  "description": "Prayan — Mind-as-a-Service (PLAN.md Phase 5): a Node/Express service hosting POST /minds/:handle/ask, each mind's own queryable endpoint. Deployed to Railway (see railway.json), not a Supabase Edge Function — owner decision 2026-07-08.",
   "type": "module",
   "engines": {
     "node": ">=20"

@@ -13,7 +13,7 @@ Work in the phase order below. After each phase: run the app, run tests, commit 
 0.1 Convert to TypeScript incrementally (`allowJs: true`), strictest settings on new files.
 0.2 Add Vitest + React Testing Library. First tests: `links.js` parser (wiki-links with/without labels, self-links, missing targets) and `store.js` (export strips `apiKey`; import round-trips).
 0.3 Add ESLint + Prettier, a CI workflow (lint, test, build), and error boundaries around each pane.
-0.4 Extract the brand tokens into `src/styles/brand.css` and document the rebrand procedure; brand is **Manyam Mind** — keep tokens centralized.
+0.4 Extract the brand tokens into `src/styles/brand.css` and document the rebrand procedure; brand is **Prayan** (renamed from Manyam Mind by owner decision, 2026-07-08) — keep tokens centralized.
 
 ## Phase 1 — Vault hardening (2–3 days)
 

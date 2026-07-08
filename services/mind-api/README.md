@@ -1,6 +1,6 @@
 # mind-api
 
-Manyam Mind's **Mind-as-a-Service** endpoint (PLAN.md Phase 5) — a small
+Prayan's **Mind-as-a-Service** endpoint (PLAN.md Phase 5) — a small
 Node/Express service, deployed on **Railway** (owner decision, 2026-07-08;
 not a Supabase Edge Function — those stay reserved for marketplace/escrow).
 Each published mind becomes a hosted, queryable model at

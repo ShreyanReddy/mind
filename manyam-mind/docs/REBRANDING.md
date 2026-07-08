@@ -1,4 +1,4 @@
-# Rebranding Manyam Mind
+# Rebranding Prayan
 
 The app is built so a full rebrand touches exactly two places: the token
 block and the wordmark markup. Everything else — every component, every
@@ -49,12 +49,12 @@ reference the token.
 
 ## 2. Update the wordmark — `src/App.jsx`
 
-The name "Manyam Mind" and its tagline are literal text in the topbar
+The name "Prayan" and its tagline are literal text in the topbar
 markup, not a token (brand *names* are copy, not CSS):
 
 ```jsx
 <span className="wordmark">
-  Manyam <span className="spark">Mind</span>
+  Pra<span className="spark">yan</span>
 </span>
 <span className="tagline">your mind, alive</span>
 ```
@@ -86,3 +86,24 @@ Then eyeball the four views (Notes, Graph, Persona, Marketplace) plus
 Settings — the graph canvas in particular reads colors via
 `getComputedStyle` at runtime (`src/components/GraphView.jsx`), so confirm
 node/synapse colors picked up the new tokens.
+
+## 5. What deliberately does NOT change on a rebrand
+
+Renaming the product must never break existing users' data or bundles.
+These identifiers are wire/storage formats, not brand copy — leave them:
+
+- `src/lib/db.js` — the Dexie database name `manyam-mind` (an existing
+  user's whole vault lives under it)
+- `src/lib/store.js` — the bundle `format: 'manyam-mind/1'` (and the
+  accepted legacy `'synapse-mind/1'`); a rename here would orphan every
+  previously exported mind
+- `src/lib/store.js` — the one-time-migration localStorage key
+  `manyam.vault.v1`
+- `src/lib/sync.js` — the CRDT origin tag `manyam-remote`
+- The `manyam-mind/` directory name and CI working-directory paths (repo
+  layout, not user-facing)
+
+History: the product shipped Phases 0–5 as "Manyam Mind" and was renamed
+to **Prayan** by owner decision on 2026-07-08 (this procedure was executed
+then; desktop identifiers `com.prayan.app` / crate `prayan` were still
+unreleased, so they were renamed outright).

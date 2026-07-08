@@ -42,7 +42,7 @@ export function renderMindPage(mind, { apiBaseUrl = '' } = {}) {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${esc(mind.handle)} — a Manyam Mind</title>
+<title>${esc(mind.handle)} — a Prayan mind</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }

@@ -538,7 +538,7 @@ function AccountSection() {
               const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
               const a = document.createElement('a')
               a.href = URL.createObjectURL(blob)
-              a.download = 'manyam-mind-account-export.json'
+              a.download = 'prayan-account-export.json'
               a.click()
               URL.revokeObjectURL(a.href)
             } catch (err) {

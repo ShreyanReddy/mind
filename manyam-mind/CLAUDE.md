@@ -1,7 +1,7 @@
 # CLAUDE.md — project instructions for Claude Code
 
 ## What this is
-Manyam Mind: a knowledge app where a person builds a "mind clone" (linked-note
+Prayan (formerly Manyam Mind): a knowledge app where a person builds a "mind clone" (linked-note
 vault + AI persona grounded in it), watches it grow as a living graph, and can
 transfer or sell the mind. The MVP works; PLAN.md is the production roadmap.
 

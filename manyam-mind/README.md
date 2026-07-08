@@ -1,4 +1,4 @@
-# Manyam Mind
+# Prayan
 
 Build, grow, and transfer your **mind clone**. An original, Obsidian-inspired knowledge app with a living graph, an AI persona grounded in your vault, and a marketplace scaffold for transferring or selling minds.
 

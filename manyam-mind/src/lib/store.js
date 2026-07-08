@@ -558,7 +558,7 @@ export const vault = {
     // 'synapse-mind/1' is the legacy format tag from before the rebrand —
     // bundles exported under the old name must still import cleanly.
     if (bundle?.format !== 'manyam-mind/1' && bundle?.format !== 'synapse-mind/1') {
-      throw new Error('Not a Manyam mind bundle')
+      throw new Error('Not a Prayan mind bundle')
     }
     if (!Array.isArray(bundle.notes)) throw new Error('Bundle notes must be an array')
 

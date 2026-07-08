@@ -39,7 +39,7 @@
 import { errorResponse, json } from '../_shared/cors.ts'
 import { serviceClient } from '../_shared/db.ts'
 
-const APP_URL_FALLBACK = 'https://app.manyam.mind' // overridden by APP_URL env when set
+const APP_URL_FALLBACK = 'https://prayan.app' // overridden by APP_URL env when set
 
 interface DigestMind {
   user_id: string
@@ -95,7 +95,7 @@ Deno.serve(async (req) => {
     if (error) throw error
 
     const resendKey = Deno.env.get('RESEND_API_KEY')
-    const mailFrom = Deno.env.get('MAIL_FROM') || 'mind@manyam.mind'
+    const mailFrom = Deno.env.get('MAIL_FROM') || 'mind@prayan.app'
     const appUrl = (Deno.env.get('APP_URL') || APP_URL_FALLBACK).replace(/\/+$/, '')
 
     let eligible = 0
