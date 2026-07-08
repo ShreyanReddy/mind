@@ -5,7 +5,11 @@ import globals from 'globals'
 import prettier from 'eslint-config-prettier'
 
 export default [
-  { ignores: ['dist', 'node_modules', 'coverage'] },
+  // supabase/functions/** are Deno Edge Functions (URL imports, `Deno.*`
+  // globals, no bundler) — a different runtime this config's browser/node
+  // ESLint setup doesn't model. Lint them with `deno lint` instead if
+  // desired; excluded here rather than mis-flagged.
+  { ignores: ['dist', 'node_modules', 'coverage', 'supabase/functions'] },
   js.configs.recommended,
   {
     files: ['**/*.{js,jsx}'],

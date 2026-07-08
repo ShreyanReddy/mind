@@ -29,5 +29,10 @@
     "verbatimModuleSyntax": false
   },
   "include": ["src", "vite.config.js"],
-  "exclude": ["node_modules", "dist"]
+  // supabase/functions/** are Deno Edge Functions (URL imports, `Deno.*`
+  // globals) — a different runtime and module system entirely. "include"
+  // above already omits them, but they're listed here too so widening
+  // "include" later doesn't silently start type-checking Deno code with a
+  // Node/browser tsconfig. Do not add them to "include".
+  "exclude": ["node_modules", "dist", "supabase/functions"]
 }

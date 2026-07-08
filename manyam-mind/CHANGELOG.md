@@ -348,3 +348,145 @@ synapses — while the internals were rebuilt for 5k nodes.
 
 `npm run lint`, `npm run typecheck`, `npm test` (104 tests, 13 files), and
 `npm run build` all pass.
+
+## Phase 3 — Marketplace: transfer & sale (Stripe on hold) — 2026-07-08
+
+PLAN.md §3, built against a live (already-provisioned) Supabase project,
+with one product-scope change made by the owner on this date:
+
+> **Stripe is on hold.** The full escrow/transfer state machine is built
+> against a `PaymentProvider` interface (`supabase/functions/_shared/
+> payments.ts`) with an **internal, no-real-money escrow provider** as the
+> live implementation and an interface-conforming `StripeStub` (every
+> method throws `'Stripe integration on hold'`) for later activation. No
+> Stripe SDK dependency, no Stripe API calls, no Stripe keys anywhere in
+> this codebase. `transfers.stripe_payment_intent` was renamed to the
+> provider-agnostic `transfers.payment_ref` (migration 0003).
+
+- **Auth + profiles (§3.1).** `src/lib/supabase.js` — a lazy supabase-js
+  client singleton, `backendConfigured` gated on
+  `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` (mirrors the existing
+  pattern in `sync.js`). `src/lib/auth.js` — `signUp`/`signIn`/`signOut`/
+  `getSession`/`onAuthChange`, plus `ensureProfile` (client-side insert,
+  covered by the new `profiles_insert_own` RLS policy) and
+  `ensureKeyPairPublished`: generates an X25519 keypair
+  (`crypto.js generateKeyPair`, libsodium `crypto_box_keypair`) on first
+  sign-in, stores it in Dexie meta (`marketplaceKeyPair` — **never**
+  uploaded, never in an exported bundle), and publishes only the public
+  half to the new `profiles.public_key` column. `src/components/
+  AuthPanel.jsx` is a compact email+password sign up/sign in form
+  (handle field on signup) rendered inside `Marketplace` when signed out.
+
+- **Listings, E2E-encrypted (§3.2), in `src/lib/marketplace.js`.**
+  `listMindForSale` now: exports the bundle, generates a fresh random
+  32-byte content key (`crypto.js generateContentKey`), encrypts it with
+  the existing XChaCha20-Poly1305 helpers, frames the upload as
+  `nonce (24B) || ciphertext` (no extra DB column needed for the nonce),
+  uploads to the private `bundles` Storage bucket at
+  `<seller_id>/<listing_id>.mind.enc`, hashes the **ciphertext** frame
+  (SHA-256, WebCrypto — `crypto.js sha256Hex`), and inserts a listing row
+  with preview-only fields (title, description, `note_count`,
+  `link_count`, `mode`) — never note content. The content key stays on
+  the seller's device (Dexie meta, `listingKey:<id>`) until a sale closes;
+  `deliverKey` is the only thing that ever moves it, and only sealed to a
+  specific buyer. Two consent checkboxes (no third-party personal data;
+  seller owns the content) are required before a listing can be created.
+  `src/lib/agreement.js` — a pure `transferAgreement(...)` function
+  generating the plain-language sale agreement, snapshotted verbatim into
+  `transfers.listing_snapshot.agreement` at purchase time so buyer/seller
+  always see what was actually stored, not a live re-render.
+
+- **Escrow state machine, internal provider (§3.3, amended).** Seven Edge
+  Functions under `supabase/functions/` (all `verify_jwt: true` — every one
+  requires an authenticated caller, buyer or seller as noted):
+  - `create-transfer` (buyer) — validates the listing, calls
+    `provider.authorize()` (internal: immediate, no real money), inserts
+    the transfer straight into `escrowed` (no unpaid `pending` row is ever
+    persisted), flips exclusive-mode listings to `sold`, snapshots the
+    listing + agreement, logs `transfer.created`/`payment.authorized`/
+    `escrow.entered`.
+  - `deliver-key` (seller) — stores the seller-sealed wrapped content key,
+    `escrowed -> delivered`, logs `key.delivered`, returns a short-lived
+    signed URL for the ciphertext.
+  - `get-bundle-url` (buyer) — the buyer-side signed-URL + wrapped-key
+    fetch, once `delivered`/`completed`.
+  - `confirm-import` (buyer) — requires `hash_ok: true` (the client already
+    verified SHA-256 before calling this), captures payment,
+    `delivered -> completed`, and for **exclusive** mode deletes the
+    seller's `vault_docs` rows (synced-copy revocation, §3.5) and logs
+    `seller_copy.revoked`.
+  - `dispute-transfer` (buyer) — `refund` or `dispute`, server-enforced 72h
+    window from `delivered_at`.
+  - `delete-account` / `export-account` — GDPR erasure and data export
+    (§3.6); erasure deletes Storage objects and the auth user, and relies
+    on migration 0003's FK policy (cascade profile → listings; set-null on
+    transfers' buyer/seller/listing ids) to anonymize the ledger rather
+    than delete it.
+  Every transition is both function-verified (the state machine
+  transitions are hand-validated against `canTransition`, duplicated
+  identically in `supabase/functions/_shared/stateMachine.ts` and
+  `src/lib/transferState.js`, both unit-tested) and event-logged
+  (`_shared/events.ts appendEvent`) — the CLAUDE.md "webhook-verified"
+  clause applies to the (on-hold) Stripe path; internal-provider
+  transitions are function-verified + event-logged instead, and
+  `_shared/payments.ts` is exactly the seam a `stripe-webhook` function
+  would plug into later.
+
+- **RLS (§3.4), migration 0004** — one policy per bullet in PLAN.md,
+  each with an inline comment explaining the "why": `profiles` readable by
+  any authed user, writable only to your own row; `listings` readable when
+  active or your own, writable/deletable by the owner only while not sold;
+  `transfers` readable by buyer-or-seller with **no** client write policy
+  at all (service role only); `transfer_events` readable by participants,
+  again no client write policy. `supabase/tests/rls_checks.sql` has
+  commented psql-style fixtures + assertions (set role/JWT claims, expect
+  row counts) for the orchestrator to run via `execute_sql`.
+
+- **Buyer import flow (§3.5), in `Marketplace.jsx`'s "My purchases" tab.**
+  `importPurchasedBundle` downloads the signed-URL ciphertext, verifies its
+  SHA-256 against the listing's `bundle_hash` (**fails loudly, never
+  decrypts, never confirms** on mismatch), unseals the content key with
+  the local private key (`crypto_box_seal_open`), decrypts, calls
+  `vault.importBundle`, then `confirm-import`. Each purchase shows a
+  timeline built from `transfer_events`. The seller side (`My listings`)
+  shows an honest banner when an exclusive sale completes: server-side
+  revocation happened, but earlier local exports can't be technically
+  revoked — the sale contract governs those.
+
+- **Migrations.** `0003_marketplace_e2e.sql` — `profiles.public_key`;
+  drops the MVP plaintext `listings.bundle` column for good; adds
+  `listings.bundle_path`/`note_count`/`link_count`/`mode`; renames
+  `transfers.stripe_payment_intent` → `payment_ref`; adds
+  `transfers.wrapped_key`/`listing_snapshot`/`delivered_at`; re-points FKs
+  for the GDPR cascade/anonymize policy above; creates the private
+  `bundles` Storage bucket with own-prefix insert/update/delete policies
+  and deliberately no read policy. `0004_rls.sql` — the table RLS policies
+  described above. Both are idempotent (guarded `if not exists`/`drop
+  policy if exists`/information_schema checks) so re-applying is safe.
+
+- **Config.** `supabase/functions/**` are Deno Edge Functions (URL imports,
+  `Deno.*` globals) — excluded from `tsconfig.json` and `eslint.config.js`
+  (documented inline in both files) since they're a different runtime the
+  Node/browser toolchain doesn't model. `.env.example` documents every env
+  var (client `VITE_*` and Edge Function secrets, all placeholders). A new
+  `.env.test` zeroes the two `VITE_SUPABASE_*` vars for the unit-test mode
+  Vite loads automatically, so the suite runs deterministically offline
+  regardless of a developer's real `.env.local` — tests that need a
+  configured backend mock `src/lib/supabase.js` directly instead.
+
+- **Tests.** 36 new: `agreement.test.js` (pure-function coverage, incl. the
+  exclusive-mode honesty language and price/date formatting),
+  `transferState.test.js` (the full `canTransition` matrix, terminal
+  states, backwards/skip transitions rejected), `marketplaceCrypto.test.js`
+  (X25519 seal/unseal round trip and cross-key rejection, content-key
+  generation, SHA-256 determinism/tamper-detection, the nonce-framing
+  round trip), and `marketplace.test.js` (client marketplace logic against
+  a mocked supabase-js client: consent/validation gating, the encrypt→
+  upload→insert listing flow with a real hash check, buy/withdraw,
+  `deliverKey`'s real seal round trip, `importPurchasedBundle`'s full
+  download→verify→unseal→decrypt→import→confirm path including the
+  hash-mismatch abort path, and dispute). All 104 pre-existing tests
+  untouched and passing.
+
+`npm run lint`, `npm run typecheck`, `npm test` (140 tests, 17 files), and
+`npm run build` all pass.
