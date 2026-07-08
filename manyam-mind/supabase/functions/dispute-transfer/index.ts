@@ -18,6 +18,7 @@ import { appendEvent } from '../_shared/events.ts'
 import { canTransition } from '../_shared/stateMachine.ts'
 import { getPaymentProvider } from '../_shared/payments.ts'
 import { parseJsonBody, requireUuid, requireOneOf, ValidationError } from '../_shared/validate.ts'
+import { allowRate } from '../_shared/rateLimit.ts'
 
 const DISPUTE_WINDOW_MS = 72 * 60 * 60 * 1000
 
@@ -29,6 +30,9 @@ Deno.serve(async (req) => {
   try {
     const user = await getCallerUser(req)
     if (!user) return errorResponse('Sign in required.', 401)
+    // PLAN.md §6.4 — per-user burst limit (10/min); see _shared/rateLimit.ts
+    if (!allowRate('dispute-transfer:' + user.id, 10, 60000))
+      return errorResponse('Too many requests — try again shortly.', 429)
 
     const body = await parseJsonBody(req)
     const transferId = requireUuid(body, 'transfer_id')

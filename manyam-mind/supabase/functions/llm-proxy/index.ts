@@ -16,6 +16,7 @@ import { serviceClient } from '../_shared/db.ts'
 import { getCallerUser } from '../_shared/auth.ts'
 import { parseJsonBody, requireString, requireOneOf, ValidationError } from '../_shared/validate.ts'
 import { enforceDailyCap, recordUsage, UsageCapExceededError } from '../_shared/usage.ts'
+import { allowRate } from '../_shared/rateLimit.ts'
 
 const PROVIDERS = ['anthropic', 'openai', 'gemini'] as const
 type Provider = (typeof PROVIDERS)[number]
@@ -111,6 +112,9 @@ Deno.serve(async (req) => {
   try {
     const user = await getCallerUser(req)
     if (!user) return errorResponse('Sign in required.', 401)
+    // PLAN.md §6.4 — per-user burst limit (30/min); see _shared/rateLimit.ts
+    if (!allowRate('llm-proxy:' + user.id, 30, 60000))
+      return errorResponse('Too many requests — try again shortly.', 429)
 
     const body = await parseJsonBody(req)
     const provider = requireOneOf(body, 'provider', PROVIDERS)

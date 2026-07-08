@@ -18,6 +18,7 @@ import { appendEvent } from '../_shared/events.ts'
 import { getPaymentProvider } from '../_shared/payments.ts'
 import { transferAgreement } from '../_shared/agreement.ts'
 import { parseJsonBody, requireUuid, ValidationError } from '../_shared/validate.ts'
+import { allowRate } from '../_shared/rateLimit.ts'
 
 Deno.serve(async (req) => {
   const preflight = handlePreflight(req)
@@ -27,6 +28,9 @@ Deno.serve(async (req) => {
   try {
     const user = await getCallerUser(req)
     if (!user) return errorResponse('Sign in required.', 401)
+    // PLAN.md §6.4 — per-user burst limit (10/min); see _shared/rateLimit.ts
+    if (!allowRate('create-transfer:' + user.id, 10, 60000))
+      return errorResponse('Too many requests — try again shortly.', 429)
 
     const body = await parseJsonBody(req)
     const listingId = requireUuid(body, 'listing_id')

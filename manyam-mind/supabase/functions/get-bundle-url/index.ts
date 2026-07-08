@@ -13,6 +13,7 @@ import { handlePreflight, json, errorResponse } from '../_shared/cors.ts'
 import { serviceClient } from '../_shared/db.ts'
 import { getCallerUser } from '../_shared/auth.ts'
 import { parseJsonBody, requireUuid, ValidationError } from '../_shared/validate.ts'
+import { allowRate } from '../_shared/rateLimit.ts'
 
 const SIGNED_URL_TTL_SECONDS = 3600
 
@@ -24,6 +25,9 @@ Deno.serve(async (req) => {
   try {
     const user = await getCallerUser(req)
     if (!user) return errorResponse('Sign in required.', 401)
+    // PLAN.md §6.4 — per-user burst limit (30/min); see _shared/rateLimit.ts
+    if (!allowRate('get-bundle-url:' + user.id, 30, 60000))
+      return errorResponse('Too many requests — try again shortly.', 429)
 
     const body = await parseJsonBody(req)
     const transferId = requireUuid(body, 'transfer_id')

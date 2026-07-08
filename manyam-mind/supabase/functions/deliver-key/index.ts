@@ -18,6 +18,7 @@ import { getCallerUser } from '../_shared/auth.ts'
 import { appendEvent } from '../_shared/events.ts'
 import { canTransition } from '../_shared/stateMachine.ts'
 import { parseJsonBody, requireUuid, requireString, ValidationError } from '../_shared/validate.ts'
+import { allowRate } from '../_shared/rateLimit.ts'
 
 const SIGNED_URL_TTL_SECONDS = 3600
 
@@ -29,6 +30,9 @@ Deno.serve(async (req) => {
   try {
     const user = await getCallerUser(req)
     if (!user) return errorResponse('Sign in required.', 401)
+    // PLAN.md §6.4 — per-user burst limit (20/min); see _shared/rateLimit.ts
+    if (!allowRate('deliver-key:' + user.id, 20, 60000))
+      return errorResponse('Too many requests — try again shortly.', 429)
 
     const body = await parseJsonBody(req)
     const transferId = requireUuid(body, 'transfer_id')

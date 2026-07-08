@@ -11,6 +11,7 @@
 import { handlePreflight, json, errorResponse } from '../_shared/cors.ts'
 import { serviceClient } from '../_shared/db.ts'
 import { getCallerUser } from '../_shared/auth.ts'
+import { allowRate } from '../_shared/rateLimit.ts'
 
 Deno.serve(async (req) => {
   const preflight = handlePreflight(req)
@@ -20,6 +21,9 @@ Deno.serve(async (req) => {
   try {
     const user = await getCallerUser(req)
     if (!user) return errorResponse('Sign in required.', 401)
+    // PLAN.md §6.4 — per-user burst limit (6/hour); see _shared/rateLimit.ts
+    if (!allowRate('export-account:' + user.id, 6, 3600000))
+      return errorResponse('Too many requests — try again shortly.', 429)
 
     const db = serviceClient()
 

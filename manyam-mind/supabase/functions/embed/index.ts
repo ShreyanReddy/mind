@@ -25,6 +25,7 @@ import { serviceClient } from '../_shared/db.ts'
 import { getCallerUser } from '../_shared/auth.ts'
 import { parseJsonBody, ValidationError } from '../_shared/validate.ts'
 import { enforceDailyCap, recordUsage, UsageCapExceededError } from '../_shared/usage.ts'
+import { allowRate } from '../_shared/rateLimit.ts'
 
 const MAX_TEXTS = 64
 const MAX_CHARS = 4000 // generous ceiling for a ~500-token chunk
@@ -85,6 +86,9 @@ Deno.serve(async (req) => {
   try {
     const user = await getCallerUser(req)
     if (!user) return errorResponse('Sign in required.', 401)
+    // PLAN.md §6.4 — per-user burst limit (30/min); see _shared/rateLimit.ts
+    if (!allowRate('embed:' + user.id, 30, 60000))
+      return errorResponse('Too many requests — try again shortly.', 429)
 
     const body = await parseJsonBody(req)
     const texts = requireTexts(body)
