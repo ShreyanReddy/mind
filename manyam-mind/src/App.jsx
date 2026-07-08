@@ -10,6 +10,7 @@ import Marketplace from './components/Marketplace.jsx'
 import Settings from './components/Settings.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import CommandPalette from './components/CommandPalette.jsx'
+import Onboarding from './components/Onboarding.jsx'
 
 // simple original glyphs for the ribbon (no external icon set needed)
 const VIEWS = [
@@ -25,6 +26,9 @@ export default function App() {
   const [activeId, setActiveId] = useState(vault.get().notes[0]?.id || null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [interviewSignal, setInterviewSignal] = useState(0)
+  // Mobile-only (PLAN.md §6.1): the sidebar becomes an off-canvas drawer under
+  // 720px, toggled from the topbar. Ignored by the desktop layout entirely.
+  const [menuOpen, setMenuOpen] = useState(false)
 
   useEffect(() => vault.subscribe(() => force((n) => n + 1)), [])
 
@@ -56,7 +60,7 @@ export default function App() {
   }, [])
 
   const note = vault.get().notes.find((n) => n.id === activeId) || null
-  const openNote = (id) => { setActiveId(id); setView('Notes') }
+  const openNote = (id) => { setActiveId(id); setView('Notes'); setMenuOpen(false) }
 
   const showContext = view === 'Notes'
 
@@ -100,10 +104,18 @@ export default function App() {
   )
 
   return (
-    <div className={'app' + (showContext ? '' : ' no-context')}>
+    <div className={'app' + (showContext ? '' : ' no-context') + (menuOpen ? ' menu-open' : '')}>
       <header className="topbar">
+        <button
+          className="menu-btn"
+          aria-label="Toggle note list"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((o) => !o)}
+        >
+          ☰
+        </button>
         <span className="wordmark">
-          Manyam <span className="spark">Mind</span>
+          Pra<span className="spark">yan</span>
         </span>
         <span className="tagline">your mind, alive</span>
         <span className="spacer" />
@@ -116,7 +128,7 @@ export default function App() {
             className={view === v.id ? 'on' : ''}
             title={v.label}
             aria-label={v.label}
-            onClick={() => setView(v.id)}
+            onClick={() => { setView(v.id); setMenuOpen(false) }}
           >
             {v.glyph}
           </button>
@@ -135,6 +147,7 @@ export default function App() {
       <ErrorBoundary label="Sidebar">
         <Sidebar activeId={activeId} onSelect={openNote} />
       </ErrorBoundary>
+      {menuOpen && <div className="drawer-scrim" onClick={() => setMenuOpen(false)} />}
 
       <ErrorBoundary label={view}>
         {view === 'Notes' && <Editor note={note} onNavigate={openNote} />}
@@ -164,6 +177,11 @@ export default function App() {
         notes={vault.get().notes}
         onOpenNote={openNote}
         commands={commands}
+      />
+
+      <Onboarding
+        onCreateNote={() => openNote(vault.createNote().id)}
+        onShowGraph={() => setView('Graph')}
       />
     </div>
   )

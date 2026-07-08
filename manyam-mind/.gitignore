@@ -4,3 +4,7 @@ coverage
 .env
 .env.local
 *.local
+
+# tauri build artifacts
+src-tauri/target
+src-tauri/gen

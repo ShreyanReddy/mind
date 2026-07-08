@@ -1,37 +1,77 @@
-// Folder-vault mode — PLAN.md §1.1. Optional, off by default. When
-// connected, every note round-trips as a real `.md` file on disk via the
-// File System Access API: `<safe-title>-<id8>.md` with YAML frontmatter
-// (id, title, aliases, tags, folder, createdAt, updatedAt, edits) + body.
+// Folder-vault mode — PLAN.md §1.1 (web) + §6.1 (desktop). Optional, off by
+// default. When connected, every note round-trips as a real `.md` file on
+// disk: `<safe-title>-<id8>.md` with YAML frontmatter (id, title, aliases,
+// tags, folder, createdAt, updatedAt, edits) + body.
 //
-// Feature-detected (`window.showDirectoryPicker`) and guarded everywhere so
-// this module is a safe no-op under jsdom/Node (tests, SSR).
+// Two backends behind one public API:
+//   web   — File System Access API directory handles (Chromium browsers)
+//   tauri — the desktop shell's dialog + fs plugins (a plain folder path);
+//           modules are dynamically imported so the web bundle never loads
+//           them, and tauri-plugin-persisted-scope keeps the picked folder
+//           readable across restarts.
+// Feature-detected and guarded everywhere so this module is a safe no-op
+// under jsdom/Node (tests, SSR).
 
 import { db } from './db.js'
 
 const EXPORT_DEBOUNCE = 800
 const HANDLE_META_KEY = 'fsVaultHandle'
 
+export function isTauri() {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+}
+
 export function isSupported() {
+  if (isTauri()) return true
   return typeof window !== 'undefined' && typeof window.showDirectoryPicker === 'function'
 }
 
-let directoryHandle = null
+// { kind: 'web', handle } | { kind: 'tauri', path }
+let connection = null
 let exportTimer = null
 
-export function isConnected() {
-  return Boolean(directoryHandle)
+// Test seam: lets unit tests inject fakes for the Tauri modules, which only
+// exist at runtime inside the desktop shell.
+let tauriModulesOverride = null
+export function __setTauriModules(mods) {
+  tauriModulesOverride = mods
 }
 
-/** Prompt the user to pick a folder; persist the handle (structured-clonable) to Dexie. */
+async function tauriModules() {
+  if (tauriModulesOverride) return tauriModulesOverride
+  const [dialog, fs, path] = await Promise.all([
+    import('@tauri-apps/plugin-dialog'),
+    import('@tauri-apps/plugin-fs'),
+    import('@tauri-apps/api/path'),
+  ])
+  return { dialog, fs, path }
+}
+
+export function isConnected() {
+  return Boolean(connection)
+}
+
+/** Prompt the user to pick a folder; persist the connection to Dexie. */
 export async function connect() {
   if (!isSupported()) throw new Error('File System Access API is not supported in this browser')
-  directoryHandle = await window.showDirectoryPicker()
-  await db.meta.put({ key: HANDLE_META_KEY, value: directoryHandle })
-  return directoryHandle
+  if (isTauri()) {
+    const { dialog } = await tauriModules()
+    const path = await dialog.open({ directory: true, title: 'Choose your vault folder' })
+    if (!path) throw new Error('No folder was chosen')
+    connection = { kind: 'tauri', path }
+    await db.meta.put({ key: HANDLE_META_KEY, value: { kind: 'tauri', path } })
+    return path
+  }
+  const handle = await window.showDirectoryPicker()
+  connection = { kind: 'web', handle }
+  // The raw handle (not wrapped) keeps the pre-desktop Dexie rows readable —
+  // reconnect() accepts both shapes.
+  await db.meta.put({ key: HANDLE_META_KEY, value: handle })
+  return handle
 }
 
 export async function disconnect() {
-  directoryHandle = null
+  connection = null
   await db.meta.delete(HANDLE_META_KEY)
 }
 
@@ -40,14 +80,25 @@ export async function reconnect() {
   if (!isSupported()) return null
   try {
     const row = await db.meta.get(HANDLE_META_KEY)
-    const handle = row?.value
+    const stored = row?.value
+    if (!stored) return null
+
+    if (stored.kind === 'tauri') {
+      if (!isTauri()) return null // vault DB copied into a plain browser — can't reach the path
+      const { fs } = await tauriModules()
+      if (!(await fs.exists(stored.path))) return null
+      connection = { kind: 'tauri', path: stored.path }
+      return stored.path
+    }
+
+    const handle = stored.kind === 'web' ? stored.handle : stored // raw-handle legacy shape
     if (!handle) return null
     if (handle.queryPermission) {
       let perm = await handle.queryPermission({ mode: 'readwrite' })
       if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'readwrite' })
       if (perm !== 'granted') return null
     }
-    directoryHandle = handle
+    connection = { kind: 'web', handle }
     return handle
   } catch {
     return null
@@ -119,8 +170,13 @@ export function fromMarkdown(text, fallbackTitle) {
   }
 }
 
-async function writeNoteFile(dirHandle, note) {
-  const fh = await dirHandle.getFileHandle(fileNameFor(note), { create: true })
+async function writeNoteFile(note) {
+  if (connection.kind === 'tauri') {
+    const { fs, path } = await tauriModules()
+    await fs.writeTextFile(await path.join(connection.path, fileNameFor(note)), toMarkdown(note))
+    return
+  }
+  const fh = await connection.handle.getFileHandle(fileNameFor(note), { create: true })
   const writable = await fh.createWritable()
   await writable.write(toMarkdown(note))
   await writable.close()
@@ -128,27 +184,43 @@ async function writeNoteFile(dirHandle, note) {
 
 /** Export every note now. */
 export async function exportAll(notes) {
-  if (!directoryHandle) return
-  for (const note of notes) await writeNoteFile(directoryHandle, note)
+  if (!connection) return
+  for (const note of notes) await writeNoteFile(note)
 }
 
 /** Debounced export — call on every vault change while connected. */
 export function scheduleExport(notes) {
-  if (!directoryHandle) return
+  if (!connection) return
   clearTimeout(exportTimer)
   exportTimer = setTimeout(() => {
     exportAll(notes).catch((err) => console.error('[fsvault] export failed', err))
   }, EXPORT_DEBOUNCE)
 }
 
-/** Parse every .md file in the connected folder into vault-shaped note objects. */
-export async function loadFromFolder() {
-  if (!directoryHandle) throw new Error('No folder connected')
-  const notes = []
-  for await (const [name, handle] of directoryHandle.entries()) {
+/** List every .md file in the connected folder as [name, text] pairs. */
+async function readMarkdownFiles() {
+  const files = []
+  if (connection.kind === 'tauri') {
+    const { fs, path } = await tauriModules()
+    for (const entry of await fs.readDir(connection.path)) {
+      if (entry.isDirectory || !entry.name.toLowerCase().endsWith('.md')) continue
+      files.push([entry.name, await fs.readTextFile(await path.join(connection.path, entry.name))])
+    }
+    return files
+  }
+  for await (const [name, handle] of connection.handle.entries()) {
     if (handle.kind !== 'file' || !name.toLowerCase().endsWith('.md')) continue
     const file = await handle.getFile()
-    const text = await file.text()
+    files.push([name, await file.text()])
+  }
+  return files
+}
+
+/** Parse every .md file in the connected folder into vault-shaped note objects. */
+export async function loadFromFolder() {
+  if (!connection) throw new Error('No folder connected')
+  const notes = []
+  for (const [name, text] of await readMarkdownFiles()) {
     const fallbackTitle = name.replace(/-[a-f0-9]{8}\.md$/i, '').replace(/\.md$/i, '')
     const parsed = fromMarkdown(text, fallbackTitle)
     notes.push({

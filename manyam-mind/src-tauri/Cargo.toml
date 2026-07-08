@@ -1,0 +1,32 @@
+# Prayan desktop shell — PLAN.md §6.1. A thin Tauri 2 wrapper around the
+# web app; all product logic stays in the web codebase. The only native
+# surface the frontend uses is the dialog + fs plugins (folder-vault mode,
+# src/lib/fsvault.js) plus persisted-scope so a picked vault folder stays
+# readable across restarts without re-picking.
+
+[package]
+name = "prayan"
+version = "0.1.0"
+description = "Prayan — build, grow, and transfer your mind clone."
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "prayan_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-persisted-scope = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true

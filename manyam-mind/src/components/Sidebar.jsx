@@ -52,7 +52,7 @@ export default function Sidebar({ activeId, onSelect }) {
   }
 
   return (
-    <div className="pane">
+    <div className="pane sidebar">
       <div className="pane-h">
         Vault
         <span className="spacer" />

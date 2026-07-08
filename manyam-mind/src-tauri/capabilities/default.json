@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Main window: folder-vault mode needs the directory picker plus read/write of .md files inside the folder the user explicitly picked. The fs scope below is the OUTER bound; actual access is narrowed at runtime to dialog-picked folders (persisted by tauri-plugin-persisted-scope).",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
+    "fs:allow-read-dir",
+    "fs:allow-exists",
+    {
+      "identifier": "fs:scope",
+      "allow": [{ "path": "$HOME/**" }, { "path": "$DOCUMENT/**" }]
+    }
+  ]
+}

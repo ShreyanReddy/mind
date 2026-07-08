@@ -2,7 +2,7 @@
   "name": "manyam-mind",
   "private": true,
   "version": "0.1.0",
-  "description": "Manyam Mind — build, grow, and transfer your mind clone. Knowledge vault + living graph + AI persona.",
+  "description": "Prayan — build, grow, and transfer your mind clone. Knowledge vault + living graph + AI persona.",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,10 +12,14 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "tauri": "tauri"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.1",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-fs": "^2.5.1",
     "dexie": "^4.4.4",
     "libsodium-wrappers-sumo": "^0.8.4",
     "marked": "^12.0.0",
@@ -26,6 +30,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.61.1",
+    "@tauri-apps/cli": "^2.11.4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@vitejs/plugin-react": "^4.2.0",

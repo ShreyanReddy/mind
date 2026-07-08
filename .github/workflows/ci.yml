@@ -34,6 +34,29 @@ jobs:
       - name: Build
         run: npm run build
 
+  # Phase 6 (PLAN.md §6.1) — keep the Tauri desktop shell compiling on every
+  # push. Full three-OS bundling lives in desktop.yml (dispatch/tag only);
+  # this is just `cargo check` so the Rust side can't rot silently.
+  desktop-check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: manyam-mind/src-tauri
+
+      - name: Install Linux webview dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev
+
+      - name: cargo check
+        working-directory: manyam-mind/src-tauri
+        run: cargo check --locked
+
   # Phase 5 (PLAN.md §5) — the mind-api service is a separate Node package
   # (services/mind-api/), deployed independently on Railway; it gets its
   # own job with its own working directory and its own dependency cache so
